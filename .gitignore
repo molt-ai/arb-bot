@@ -1,6 +1,7 @@
-node_modules/
-.env
 *.log
 .DS_Store
-scans/
+.env
+.kalshi-key.pem
 data/
+node_modules/
+scans/

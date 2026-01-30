@@ -11,6 +11,7 @@ import { MarketScanner } from './market-scanner.js';
 import { createDashboard } from './dashboard.js';
 import { sendAlert } from './alerts.js';
 import { config } from '../config.js';
+import { loadKalshiCredentials, generateKalshiHeaders } from './kalshi-auth.js';
 
 const POLY_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const KALSHI_WS_URL = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
@@ -48,6 +49,16 @@ class LiveBot {
         this.dashboard = null;
         this.polyConnected = false;
         this.kalshiConnected = false;
+        this.kalshiRestMode = false;
+
+        // Load Kalshi credentials
+        try {
+            this.kalshiCreds = loadKalshiCredentials();
+            console.log('[AUTH] Kalshi API key loaded ✅');
+        } catch (e) {
+            console.warn('[AUTH] No Kalshi credentials:', e.message);
+            this.kalshiCreds = null;
+        }
     }
 
     async start() {
@@ -232,61 +243,71 @@ class LiveBot {
     // ── Kalshi WebSocket ────────────────────────────────────
 
     connectKalshiWS() {
-        // Try production first, then demo, then fall back to REST
-        const endpoints = [
-            { url: KALSHI_WS_URL, label: 'production' },
-            { url: 'wss://demo-api.kalshi.co/trade-api/ws/v2', label: 'demo' },
-        ];
-        this._kalshiWsAttempt = (this._kalshiWsAttempt || 0);
-        const endpoint = endpoints[this._kalshiWsAttempt % endpoints.length];
+        if (!this.kalshiCreds) {
+            console.log('[KALSHI-WS] No API credentials — using REST polling');
+            this.kalshiRestMode = true;
+            this.startKalshiPolling();
+            return;
+        }
 
-        console.log(`[KALSHI-WS] Connecting to ${endpoint.label}...`);
-        this.kalshiWs = new WebSocket(endpoint.url);
+        console.log('[KALSHI-WS] Connecting with authenticated session...');
 
-        this.kalshiWs.on('open', () => {
-            console.log(`[KALSHI-WS] ✅ Connected (${endpoint.label})`);
-            this.kalshiConnected = true;
-            this._kalshiWsAttempt = 0; // reset on success
-            this.subscribeKalshiMarkets();
-        });
+        try {
+            const headers = generateKalshiHeaders(
+                this.kalshiCreds.keyId,
+                this.kalshiCreds.privateKey
+            );
 
-        this.kalshiWs.on('message', (raw) => {
-            try {
-                this.handleKalshiMessage(JSON.parse(raw.toString()));
-            } catch (e) { /* ignore */ }
-        });
+            this.kalshiWs = new WebSocket(KALSHI_WS_URL, { headers });
 
-        this.kalshiWs.on('close', (code) => {
-            this.kalshiConnected = false;
-            this._kalshiWsAttempt++;
+            this.kalshiWs.on('open', () => {
+                console.log('[KALSHI-WS] ✅ Connected (authenticated)');
+                this.kalshiConnected = true;
+                this._kalshiWsRetries = 0;
+                this.subscribeKalshiMarkets();
+            });
 
-            if (this._kalshiWsAttempt >= endpoints.length * 2) {
-                // Both endpoints failed twice — fall back to REST polling
-                console.log(`[KALSHI-WS] All endpoints failed. Using REST polling (5s).`);
-                this.kalshiRestMode = true;
-                this.startKalshiPolling();
-            } else {
-                const next = endpoints[this._kalshiWsAttempt % endpoints.length];
-                console.log(`[KALSHI-WS] Failed (code ${code}), trying ${next.label} in 3s...`);
-                setTimeout(() => this.connectKalshiWS(), 3000);
-            }
-        });
+            this.kalshiWs.on('message', (raw) => {
+                try {
+                    this.handleKalshiMessage(JSON.parse(raw.toString()));
+                } catch (e) { /* ignore */ }
+            });
 
-        this.kalshiWs.on('error', (err) => {
-            // Suppress repeated error logs
-            if (!this._kalshiErrorLogged) {
-                console.error('[KALSHI-WS] Error:', err.message);
-                this._kalshiErrorLogged = true;
-                setTimeout(() => { this._kalshiErrorLogged = false; }, 30000);
-            }
-        });
+            this.kalshiWs.on('close', (code) => {
+                this.kalshiConnected = false;
+                this._kalshiWsRetries = (this._kalshiWsRetries || 0) + 1;
+
+                if (this._kalshiWsRetries >= 5) {
+                    console.log(`[KALSHI-WS] Failed ${this._kalshiWsRetries}x. Falling back to REST polling.`);
+                    this.kalshiRestMode = true;
+                    this.startKalshiPolling();
+                } else {
+                    const delay = Math.min(5000 * this._kalshiWsRetries, 30000);
+                    console.log(`[KALSHI-WS] Disconnected (code ${code}), retry #${this._kalshiWsRetries} in ${delay/1000}s...`);
+                    setTimeout(() => this.connectKalshiWS(), delay);
+                }
+            });
+
+            this.kalshiWs.on('error', (err) => {
+                if (!this._kalshiErrorLogged) {
+                    console.error('[KALSHI-WS] Error:', err.message);
+                    this._kalshiErrorLogged = true;
+                    setTimeout(() => { this._kalshiErrorLogged = false; }, 30000);
+                }
+            });
+        } catch (e) {
+            console.error('[KALSHI-WS] Auth error:', e.message);
+            console.log('[KALSHI-WS] Falling back to REST polling.');
+            this.kalshiRestMode = true;
+            this.startKalshiPolling();
+        }
     }
 
     startKalshiPolling() {
         if (this._kalshiPollInterval) return;
         console.log('[KALSHI-REST] Starting 5s polling as fallback');
         this._kalshiPollInterval = setInterval(() => this.pollKalshiFallback(), 5000);
-        this.pollKalshiFallback(); // immediate first poll
+        this.pollKalshiFallback();
     }
 
     subscribeKalshiMarkets() {
