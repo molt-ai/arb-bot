@@ -11,7 +11,8 @@ import { MarketScanner } from './market-scanner.js';
 import { createDashboard } from './dashboard.js';
 import { sendAlert } from './alerts.js';
 import { config } from '../config.js';
-import { loadKalshiCredentials, generateKalshiHeaders } from './kalshi-auth.js';
+import { loadKalshiCredentials, generateKalshiHeaders, generateKalshiRestHeaders } from './kalshi-auth.js';
+import { MARKET_PAIRS, resolvePair } from './market-pairs.js';
 
 const POLY_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const KALSHI_WS_URL = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
@@ -89,101 +90,77 @@ class LiveBot {
         console.log('\n[LIVE] Bot running. Dashboard live.\n');
     }
 
-    // ── Market Discovery ────────────────────────────────────
+    // ── Market Discovery (Multi-Category) ─────────────────
 
     async scanMarkets() {
         try {
-            console.log('\n[SCAN] Discovering markets...');
+            console.log('\n[SCAN] Scanning all cross-platform markets...');
+            const activePairs = MARKET_PAIRS.filter(p => p.active);
+            console.log(`[SCAN] Checking ${activePairs.length} market categories...`);
 
-            const polyId = this.extractSlug(this.config.polymarketUrl);
-            const kalshiId = this.extractSlug(this.config.kalshiUrl);
+            const fetchKalshi = async (path) => {
+                if (!this.kalshiCreds) throw new Error('No creds');
+                const headers = generateKalshiRestHeaders(
+                    this.kalshiCreds.keyId, this.kalshiCreds.privateKey,
+                    'GET', `/trade-api/v2${path}`
+                );
+                const res = await fetch(`https://api.elections.kalshi.com/trade-api/v2${path}`, { headers });
+                if (!res.ok) throw new Error(`${res.status}`);
+                return res.json();
+            };
 
-            const [polyMarkets, kalshiMarkets] = await Promise.all([
-                this.polymarket.getMarketsBySlug(polyId).catch(() => []),
-                this.kalshi.getMarketsBySlug(kalshiId).catch(() => [])
-            ]);
+            const newMappings = [];
+            for (const pair of activePairs) {
+                const resolved = await resolvePair(pair, fetchKalshi);
+                let added = 0;
+                for (const r of resolved) {
+                    if (r.kalshiTicker && r.polyYes != null) {
+                        newMappings.push({
+                            name: r.name,
+                            category: r.category,
+                            polyMarketId: r.polyMarketId,
+                            polyTokenId: r.polyTokenId || r.polyMarketId,
+                            kalshiTicker: r.kalshiTicker,
+                            polyYes: r.polyYes,
+                            polyNo: r.polyNo,
+                            kalshiYes: r.kalshiYes,
+                            kalshiNo: r.kalshiNo,
+                        });
+                        added++;
+                    }
+                }
+                if (resolved.length > 0) {
+                    console.log(`  ✓ ${pair.name}: ${resolved.length} resolved, ${added} with prices`);
+                }
+            }
 
-            this.marketMappings = this.buildMappings(polyMarkets, kalshiMarkets);
-            console.log(`[SCAN] Mapped ${this.marketMappings.length} pairs`);
+            this.marketMappings = newMappings;
+            console.log(`[SCAN] Total: ${this.marketMappings.length} cross-platform pairs across ${activePairs.length} categories`);
 
-            await this.discoverAdditionalMarkets();
-
-            // Re-subscribe WebSockets to new markets
+            // Re-subscribe WebSockets
             if (this.polyConnected) this.subscribePolyMarkets();
             if (this.kalshiConnected) this.subscribeKalshiMarkets();
+
+            // Seed initial prices from scan data
+            for (const m of this.marketMappings) {
+                if (m.polyYes != null) {
+                    this.polyPrices.set(m.polyTokenId, {
+                        yes: m.polyYes, no: m.polyNo,
+                        lastUpdate: Date.now(), source: 'scan'
+                    });
+                }
+                if (m.kalshiYes != null) {
+                    this.kalshiPrices.set(m.kalshiTicker, {
+                        yes: m.kalshiYes, no: m.kalshiNo || (100 - m.kalshiYes),
+                        lastUpdate: Date.now(), source: 'scan'
+                    });
+                }
+                this.evaluateSpread(m);
+            }
 
         } catch (e) {
             console.error('[SCAN] Error:', e.message);
         }
-    }
-
-    async discoverAdditionalMarkets() {
-        const additionalPairs = [
-            { poly: 'will-trump-be-president-on-march-31', kalshi: 'KXTRUMPPRES' },
-            { poly: 'bitcoin-100k', kalshi: 'KXBTC' },
-            { poly: 'us-recession-2026', kalshi: 'KXRECESSION' },
-            { poly: 'fed-funds-rate', kalshi: 'KXFEDRATE' },
-        ];
-
-        for (const pair of additionalPairs) {
-            try {
-                const [polyM, kalshiM] = await Promise.all([
-                    this.polymarket.getMarketsBySlug(pair.poly).catch(() => null),
-                    this.kalshi.getMarketsBySlug(pair.kalshi).catch(() => null)
-                ]);
-                if (polyM && kalshiM) {
-                    for (const m of this.buildMappings(polyM, kalshiM)) {
-                        if (!this.marketMappings.find(e => e.name === m.name)) {
-                            this.marketMappings.push(m);
-                        }
-                    }
-                }
-            } catch (e) { /* skip */ }
-        }
-
-        console.log(`[SCAN] Total mappings: ${this.marketMappings.length}`);
-    }
-
-    extractSlug(url) {
-        if (url.includes('polymarket')) {
-            return url.match(/event\/([^/?]+)/)?.[1] || null;
-        }
-        const parts = url.split('/');
-        return parts[parts.length - 1].toUpperCase();
-    }
-
-    buildMappings(polyMarkets, kalshiMarkets) {
-        const mappings = [];
-        const norm = (s) => s.toLowerCase().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim();
-
-        for (const poly of polyMarkets || []) {
-            const polyName = norm(poly.outcomes?.[0]?.label || poly.question || '');
-
-            for (const kalshi of kalshiMarkets || []) {
-                const kalshiName = norm(kalshi.outcomes?.[0]?.label || kalshi.title || '');
-
-                const pw = polyName.split(' ').filter(w => w.length > 2);
-                const kw = kalshiName.split(' ').filter(w => w.length > 2);
-                const common = pw.filter(w => kw.includes(w));
-
-                if (common.length >= 2 || polyName.includes(kalshiName) || kalshiName.includes(polyName)) {
-                    const yesOut = poly.outcomes?.find(o =>
-                        o.label?.toLowerCase().includes('yes') || o.side === 'yes'
-                    );
-
-                    mappings.push({
-                        name: poly.outcomes?.[0]?.label || poly.question,
-                        polyMarketId: poly.id,
-                        polyTokenId: yesOut?.id || poly.outcomes?.[0]?.id,
-                        kalshiTicker: kalshi.ticker || kalshi.id,
-                        polyMarket: poly,
-                        kalshiMarket: kalshi
-                    });
-                    break;
-                }
-            }
-        }
-        return mappings;
     }
 
     // ── Polymarket WebSocket ────────────────────────────────
