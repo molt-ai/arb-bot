@@ -137,6 +137,9 @@ export class PaperTrader {
             polySide = 'NO'; kalshiSide = 'YES';
         }
 
+        // Skip if either price is 0 or near-0 (no real liquidity)
+        if (polyPrice <= 2 || kalshiPrice <= 2) return null;
+
         // Check if profitable after fees (resolution arb math)
         const arb = this.calcResolutionProfit(polyPrice, kalshiPrice);
         if (!arb.isProfitable) return null;
@@ -309,20 +312,37 @@ export class PaperTrader {
 
     /**
      * Check exits — for resolution arb, we HOLD positions.
+     * Auto-resolve expired positions (simulate platform payout).
      * Only exit early if spread has massively reversed (stop-loss).
      */
     checkExits(currentOpportunities) {
         const closedTrades = [];
+        const now = Date.now();
 
         for (const pos of [...this.state.positions]) {
-            const opp = currentOpportunities.find(o => o.name === pos.name);
+            // AUTO-RESOLVE: if position has expired, simulate resolution payout
+            if (pos.expiresAt) {
+                const expiryTime = new Date(pos.expiresAt).getTime();
+                // Give 2 minutes grace period after expiry for resolution
+                if (expiryTime > 0 && now > expiryTime + 2 * 60 * 1000) {
+                    const trade = this.resolvePosition(pos.name);
+                    if (trade) {
+                        console.log(`🏁 AUTO-RESOLVED: ${pos.name} | Net: ${trade.netPnl >= 0 ? '+' : ''}$${(trade.netPnl/100).toFixed(2)}`);
+                        closedTrades.push(trade);
+                    }
+                    continue;
+                }
+            }
 
-            // Only early-exit if current total cost is now > 102¢ (massive reversal)
-            // This is a stop-loss — normally we hold to resolution
+            // Stop-loss check for non-expired positions
+            const opp = currentOpportunities.find(o => o.name === pos.name);
             if (opp) {
                 let currentTotal;
                 if (pos.polySide === 'YES') {
                     currentTotal = opp.polyYes + opp.kalshiNo;
+                } else if (pos.polySide === 'YES+NO') {
+                    // Same-market arb — no stop-loss needed, hold to resolution
+                    continue;
                 } else {
                     currentTotal = opp.polyNo + opp.kalshiYes;
                 }

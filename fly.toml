@@ -1,15 +1,23 @@
-app = "molt-arb-bot"
-primary_region = "iad"  # Virginia — close to exchanges
+# fly.toml app configuration file generated for molt-arb-bot on 2026-01-30T13:19:07-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'molt-arb-bot'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
 
 [http_service]
   internal_port = 3456
   force_https = true
-  auto_stop_machines = false  # Keep running 24/7
+  auto_stop_machines = 'off'
   auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "256mb"
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024

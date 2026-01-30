@@ -12,7 +12,10 @@ import { createDashboard } from './dashboard.js';
 import { sendAlert } from './alerts.js';
 import { config } from '../config.js';
 import { loadKalshiCredentials, generateKalshiHeaders, generateKalshiRestHeaders } from './kalshi-auth.js';
-import { MARKET_PAIRS, resolvePair } from './market-pairs.js';
+import { MARKET_PAIRS, POLY_GAMMA, resolvePair } from './market-pairs.js';
+import { BinanceFeed } from './binance-feed.js';
+import { CryptoSpeedStrategy } from './crypto-speed.js';
+import { SameMarketArb } from './same-market-arb.js';
 
 const POLY_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const KALSHI_WS_URL = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
@@ -60,34 +63,46 @@ class LiveBot {
             console.warn('[AUTH] No Kalshi credentials:', e.message);
             this.kalshiCreds = null;
         }
+
+        // New strategies
+        this.binanceFeed = new BinanceFeed();
+        this.cryptoSpeed = new CryptoSpeedStrategy(this.binanceFeed, this.trader);
+        this.sameMarketArb = new SameMarketArb(this.trader);
     }
 
     async start() {
-        console.log('╔════════════════════════════════════════════╗');
-        console.log('║   🎯 ARB BOT — DUAL WEBSOCKET LIVE MODE   ║');
-        console.log('║   Poly WS + Kalshi WS • Paper Trading     ║');
-        console.log('╚════════════════════════════════════════════╝\n');
+        console.log('╔═══════════════════════════════════════════════╗');
+        console.log('║   🎯 ARB BOT v2 — MULTI-STRATEGY LIVE MODE   ║');
+        console.log('║   Cross-Platform + Crypto Speed + Rebalance   ║');
+        console.log('╚═══════════════════════════════════════════════╝\n');
 
-        // 1. Scan & map markets
+        // 1. Scan & map markets (cross-platform arb)
         await this.scanMarkets();
 
         // 2. Start dashboard
         this.dashboard = createDashboard(this, this.trader, { port: 3456 });
 
-        // 3. Connect BOTH WebSockets
+        // 3. Connect BOTH platform WebSockets
         this.connectPolyWS();
         this.connectKalshiWS();
 
-        // 4. Re-scan periodically
+        // 4. Start Binance feed + crypto speed strategy
+        this.binanceFeed.connect();
+        await this.cryptoSpeed.start();
+
+        // 5. Start same-market rebalancing arb
+        await this.sameMarketArb.start();
+
+        // 6. Re-scan periodically
         setInterval(() => this.scanMarkets(), SCAN_INTERVAL_MS);
 
-        // 5. Tick every 10s — check exits, broadcast state
+        // 7. Tick every 10s — check exits, broadcast state
         setInterval(() => this.tick(), 10000);
 
-        // 6. Kalshi REST fallback every 30s (in case WS misses something)
+        // 8. Kalshi REST fallback every 30s (in case WS misses something)
         setInterval(() => this.pollKalshiFallback(), 30000);
 
-        console.log('\n[LIVE] Bot running. Dashboard live.\n');
+        console.log('\n[LIVE] Bot running — 3 strategies active. Dashboard live.\n');
     }
 
     // ── Market Discovery (Multi-Category) ─────────────────
@@ -109,12 +124,25 @@ class LiveBot {
                 return res.json();
             };
 
+            const maxDays = this.config.maxDaysToExpiry || 7;
+            const maxExpiryMs = Date.now() + maxDays * 24 * 60 * 60 * 1000;
+
             const newMappings = [];
             for (const pair of activePairs) {
                 const resolved = await resolvePair(pair, fetchKalshi);
                 let added = 0;
+                let skippedExpiry = 0;
                 for (const r of resolved) {
                     if (r.kalshiTicker && r.polyYes != null) {
+                        // Filter by expiry date — skip markets resolving too far out
+                        if (r.expiresAt) {
+                            const expiryTime = new Date(r.expiresAt).getTime();
+                            if (expiryTime > maxExpiryMs) {
+                                skippedExpiry++;
+                                continue;
+                            }
+                        }
+
                         newMappings.push({
                             name: r.name,
                             category: r.category,
@@ -131,12 +159,119 @@ class LiveBot {
                     }
                 }
                 if (resolved.length > 0) {
-                    console.log(`  ✓ ${pair.name}: ${resolved.length} resolved, ${added} with prices`);
+                    const expiryNote = skippedExpiry > 0 ? ` (${skippedExpiry} skipped: >${ maxDays}d)` : '';
+                    console.log(`  ✓ ${pair.name}: ${resolved.length} resolved, ${added} with prices${expiryNote}`);
                 }
             }
 
+            // Dynamic discovery: scan ALL open Kalshi markets and match against top Polymarket events
+            try {
+                console.log(`\n[DISCOVERY] Scanning for additional short-dated cross-platform pairs...`);
+                const maxDaysMs = maxDays * 24 * 60 * 60 * 1000;
+                
+                // Fetch all active Kalshi markets (short-dated only)
+                let allKalshi = [];
+                let cursor = null;
+                let page = 0;
+                do {
+                    const path = cursor
+                        ? `/markets?status=open&limit=200&cursor=${cursor}`
+                        : '/markets?status=open&limit=200';
+                    const data = await fetchKalshi(path);
+                    if (data.markets?.length) allKalshi.push(...data.markets);
+                    cursor = data.cursor || null;
+                    page++;
+                } while (cursor && page < 10);
+                
+                // Filter Kalshi to short-dated only
+                const shortKalshi = allKalshi.filter(m => {
+                    const exp = m.expected_expiration_time || m.expiration_time;
+                    if (!exp) return false;
+                    return new Date(exp).getTime() <= Date.now() + maxDaysMs;
+                });
+                console.log(`[DISCOVERY] Kalshi: ${allKalshi.length} total open → ${shortKalshi.length} within ${maxDays} days`);
+                
+                // Fetch top Polymarket events by volume
+                const pRes2 = await fetch(`${POLY_GAMMA}/events?active=true&closed=false&order=volume&ascending=false&limit=100`);
+                const polyEvents = await pRes2.json();
+                const allPolyMarkets = [];
+                for (const evt of (polyEvents || [])) {
+                    for (const pm of (evt.markets || [])) {
+                        // Filter poly to short-dated
+                        if (pm.endDate && new Date(pm.endDate).getTime() <= Date.now() + maxDaysMs) {
+                            allPolyMarkets.push({ ...pm, eventTitle: evt.title });
+                        }
+                    }
+                }
+                console.log(`[DISCOVERY] Polymarket: ${allPolyMarkets.length} short-dated markets from top events`);
+                
+                // Fuzzy match — find cross-platform pairs not in our curated list
+                const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+                const existingKalshi = new Set(newMappings.map(m => m.kalshiTicker));
+                let discovered = 0;
+                
+                for (const pm of allPolyMarkets) {
+                    const polyQ = norm(pm.question || pm.groupItemTitle || pm.eventTitle || '');
+                    let bestMatch = null;
+                    let bestSim = 0;
+                    
+                    for (const km of shortKalshi) {
+                        if (existingKalshi.has(km.ticker)) continue;
+                        const kQ = norm(km.title || km.subtitle || '');
+                        
+                        const pWords = polyQ.split(' ').filter(w => w.length > 2);
+                        const kWords = kQ.split(' ').filter(w => w.length > 2);
+                        const common = pWords.filter(w => kWords.includes(w));
+                        const union = new Set([...pWords, ...kWords]).size;
+                        const sim = union > 0 ? common.length / union : 0;
+                        
+                        if (sim > bestSim && sim > 0.35) {
+                            bestSim = sim;
+                            bestMatch = km;
+                        }
+                    }
+                    
+                    if (bestMatch) {
+                        const pPrices = pm.outcomePrices ? (typeof pm.outcomePrices === 'string' ? JSON.parse(pm.outcomePrices) : pm.outcomePrices) : [];
+                        if (!pPrices[0]) continue;
+                        
+                        let tokenIds = pm.clobTokenIds;
+                        if (typeof tokenIds === 'string') {
+                            try { tokenIds = JSON.parse(tokenIds); } catch(e) {}
+                        }
+                        
+                        const kalshiYes = bestMatch.yes_ask || bestMatch.yes_bid || 0;
+                        const kalshiNo = bestMatch.no_ask || bestMatch.no_bid || 0;
+                        if (kalshiYes <= 0 && kalshiNo <= 0) continue;
+                        
+                        newMappings.push({
+                            name: pm.question || pm.groupItemTitle || bestMatch.title,
+                            category: 'discovered',
+                            polyMarketId: pm.conditionId || pm.id,
+                            polyTokenId: tokenIds?.[0] || pm.conditionId || pm.id,
+                            kalshiTicker: bestMatch.ticker,
+                            polyYes: parseFloat(pPrices[0]) * 100,
+                            polyNo: parseFloat(pPrices[1]) * 100,
+                            kalshiYes,
+                            kalshiNo,
+                            expiresAt: bestMatch.expected_expiration_time || bestMatch.expiration_time || pm.endDate,
+                        });
+                        existingKalshi.add(bestMatch.ticker);
+                        discovered++;
+                    }
+                }
+                
+                if (discovered > 0) {
+                    console.log(`[DISCOVERY] ✨ Found ${discovered} additional cross-platform pairs`);
+                } else {
+                    console.log(`[DISCOVERY] No additional pairs found beyond curated list`);
+                }
+            } catch (e) {
+                console.error('[DISCOVERY] Error in dynamic scan:', e.message);
+            }
+
             this.marketMappings = newMappings;
-            console.log(`[SCAN] Total: ${this.marketMappings.length} cross-platform pairs across ${activePairs.length} categories`);
+            console.log(`[SCAN] Total: ${this.marketMappings.length} cross-platform pairs (curated + discovered), all within ${maxDays} days`);
 
             // Re-subscribe WebSockets
             if (this.polyConnected) this.subscribePolyMarkets();
@@ -408,6 +543,10 @@ class LiveBot {
         const kalshi = this.kalshiPrices.get(mapping.kalshiTicker);
         if (!poly || !kalshi) return;
 
+        // Skip if any price is 0 or missing (no liquidity = no real opportunity)
+        const minPrice = this.config.minPriceThreshold || 2;
+        if (poly.yes <= minPrice || poly.no <= minPrice || kalshi.yes <= minPrice || kalshi.no <= minPrice) return;
+
         // Calculate both strategies using resolution arb math
         // Strategy 1: Buy Poly YES + Kalshi NO
         const cost1 = poly.yes + kalshi.no;
@@ -495,12 +634,19 @@ class LiveBot {
         const p = this.trader.getPortfolioSummary();
         const pWs = this.polyConnected ? '🟢' : '🔴';
         const kWs = this.kalshiConnected ? '🟢' : (this.kalshiRestMode ? '🔄' : '🔴');
-        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} | ${this.currentOpportunities.length} scanned (${profitable} profitable) | ${p.openPositions} pos | Net P&L: $${p.netPnL} | Fees: $${p.totalFeesPaid} | Trades: ${p.totalTrades}`);
+        const bWs = this.binanceFeed.connected ? '🟢' : '🔴';
+        const maxDays = this.config.maxDaysToExpiry || 7;
+        const csStats = this.cryptoSpeed.getStats();
+        const smStats = this.sameMarketArb.getStats();
+        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} Binance ${bWs} | XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓) CS:${csStats.activeMarkets}mkts/${csStats.signals}sig SM:${smStats.found}found | ${p.openPositions} pos | P&L: $${p.netPnL} | Trades: ${p.totalTrades}`);
     }
 
     stop() {
         if (this.polyWs) this.polyWs.close();
         if (this.kalshiWs) this.kalshiWs.close();
+        if (this.binanceFeed) this.binanceFeed.stop();
+        if (this.cryptoSpeed) this.cryptoSpeed.stop();
+        if (this.sameMarketArb) this.sameMarketArb.stop();
         if (this.dashboard?.server) this.dashboard.server.close();
         console.log('\n[STOPPED]');
     }

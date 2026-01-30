@@ -48,6 +48,21 @@ export function createDashboard(bot, trader, config = {}) {
         res.json({ ok: true, message: 'Portfolio reset' });
     });
 
+    // New strategy endpoints
+    app.get('/api/crypto-speed', (req, res) => {
+        res.json({
+            stats: bot.cryptoSpeed?.getStats() || {},
+            binance: bot.binanceFeed?.getSnapshot() || {},
+        });
+    });
+
+    app.get('/api/same-market', (req, res) => {
+        res.json({
+            stats: bot.sameMarketArb?.getStats() || {},
+            opportunities: bot.sameMarketArb?.getOpportunities() || [],
+        });
+    });
+
     // WebSocket broadcast
     const broadcast = (type, data) => {
         const msg = JSON.stringify({ type, data, timestamp: Date.now() });

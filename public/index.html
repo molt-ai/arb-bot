@@ -103,11 +103,12 @@
 </head>
 <body>
     <div class="header">
-        <h1>🎯 Arb Bot — Live Dashboard</h1>
+        <h1>🎯 Arb Bot v2 — Multi-Strategy Dashboard</h1>
         <div class="controls">
             <div class="status">
-                <span id="poly-status"><span class="dot green"></span>Poly WS</span>
-                <span style="margin-left:8px;" id="kalshi-status"><span class="dot yellow"></span>Kalshi REST</span>
+                <span id="poly-status"><span class="dot green"></span>Poly</span>
+                <span style="margin-left:6px;" id="kalshi-status"><span class="dot green"></span>Kalshi</span>
+                <span style="margin-left:6px;" id="binance-status"><span class="dot yellow"></span>Coinbase</span>
             </div>
             <button onclick="resetPortfolio()" style="margin-left: 12px;">Reset</button>
         </div>
@@ -158,11 +159,49 @@
                     <div class="label">Kalshi Balance</div>
                 </div>
             </div>
-            <div class="fee-note">Fees: ~2% Polymarket + ~3% Kalshi per contract. Only enters trades profitable AFTER fees. Holds to resolution for guaranteed payout.</div>
+            <div class="fee-note">3 strategies: Cross-Platform Arb (Poly↔Kalshi) • Crypto Speed (Coinbase→Poly 15min) • Same-Market Rebalancing (YES+NO&lt;$1)</div>
+        </div>
+
+        <div class="card full">
+            <h2>⚡ Crypto Speed — Real-Time Exchange Prices</h2>
+            <div class="stats" id="crypto-prices">
+                <div class="stat">
+                    <div class="value" id="btc-price">—</div>
+                    <div class="label">BTC</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="btc-momentum">—</div>
+                    <div class="label">BTC 2m Momentum</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="eth-price">—</div>
+                    <div class="label">ETH</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="eth-momentum">—</div>
+                    <div class="label">ETH 2m Momentum</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="sol-price">—</div>
+                    <div class="label">SOL</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="sol-momentum">—</div>
+                    <div class="label">SOL 2m Momentum</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="cs-markets">0</div>
+                    <div class="label">15m Markets</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="cs-signals">0</div>
+                    <div class="label">Signals Fired</div>
+                </div>
+            </div>
         </div>
 
         <div class="card">
-            <h2>🔥 Live Opportunities</h2>
+            <h2>🔥 Cross-Platform Opportunities</h2>
             <div class="scrollable">
                 <div class="opp-row header" style="grid-template-columns: 2fr 60px 60px 60px 70px 55px;">
                     <span>Market</span>
@@ -355,14 +394,59 @@
             fetch('/api/portfolio').then(r => r.json()).then(updatePortfolio);
         }
 
+        function updateCryptoSpeed(data) {
+            if (!data?.binance) return;
+            const snap = data.binance;
+            
+            const formatPrice = (ticker, price) => {
+                if (!price) return '—';
+                if (ticker === 'SOL') return '$' + price.toFixed(2);
+                if (ticker === 'ETH') return '$' + price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                return '$' + price.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0});
+            };
+            
+            const formatMomentum = (m) => {
+                if (!m || m.direction === 'flat') return { text: 'FLAT', cls: '' };
+                const arrow = m.changePercent > 0 ? '↑' : '↓';
+                const pct = Math.abs(m.changePercent).toFixed(3);
+                const cls = m.changePercent > 0.15 ? 'green' : m.changePercent < -0.15 ? 'red' : 'yellow';
+                return { text: `${arrow} ${pct}%`, cls };
+            };
+            
+            for (const ticker of ['BTC', 'ETH', 'SOL']) {
+                const s = snap[ticker];
+                if (!s) continue;
+                const priceEl = document.getElementById(ticker.toLowerCase() + '-price');
+                const momEl = document.getElementById(ticker.toLowerCase() + '-momentum');
+                if (priceEl) priceEl.textContent = formatPrice(ticker, s.price);
+                if (momEl && s.momentum2m) {
+                    const m = formatMomentum(s.momentum2m);
+                    momEl.textContent = m.text;
+                    momEl.className = 'value ' + m.cls;
+                }
+            }
+            
+            if (data.stats) {
+                document.getElementById('cs-markets').textContent = data.stats.activeMarkets || 0;
+                document.getElementById('cs-signals').textContent = data.stats.signals || 0;
+                const bEl = document.getElementById('binance-status');
+                if (bEl) {
+                    const dot = bEl.querySelector('.dot');
+                    if (dot) dot.className = 'dot ' + (data.stats.binanceConnected ? 'green' : 'red');
+                }
+            }
+        }
+
         setInterval(async () => {
             try {
-                const [portfolio, opps] = await Promise.all([
+                const [portfolio, opps, crypto] = await Promise.all([
                     fetch('/api/portfolio').then(r => r.json()),
-                    fetch('/api/opportunities').then(r => r.json())
+                    fetch('/api/opportunities').then(r => r.json()),
+                    fetch('/api/crypto-speed').then(r => r.json()).catch(() => null)
                 ]);
                 updatePortfolio(portfolio);
                 updateOpportunities(opps.opportunities);
+                if (crypto) updateCryptoSpeed(crypto);
                 document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
             } catch (e) {}
         }, 5000);

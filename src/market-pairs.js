@@ -21,33 +21,38 @@ export const POLY_GAMMA = 'https://gamma-api.polymarket.com';
  * - active: whether to monitor this pair
  */
 export const MARKET_PAIRS = [
-    // ═══ POLITICS & GOVERNMENT ═══
+    // ═══════════════════════════════════════════════════════════
+    // SHORT-TERM MARKETS ONLY — resolve within days, not years
+    // Long-dated pairs deactivated (capital should turn over fast)
+    // ═══════════════════════════════════════════════════════════
+
+    // ═══ POLITICS & GOVERNMENT (near-term deadlines only) ═══
     {
         name: 'Fed Chair Nomination',
         polySlug: 'who-will-trump-nominate-as-fed-chair',
         kalshiSeries: 'KXFEDCHAIRNOM',
         category: 'politics',
         matchBy: 'name',
-        active: true,
+        active: false, // no imminent resolution date
     },
     {
         name: 'Government Shutdown Jan 31',
         polySlug: 'will-there-be-another-us-government-shutdown-by-january-31',
-        kalshiTicker: 'KXGOVSHUT-26JAN31', // specific market, not series
+        kalshiTicker: 'KXGOVSHUT-26JAN31',
         category: 'politics',
-        matchBy: 'exact', // single binary market on both sides
-        active: true,
+        matchBy: 'exact',
+        active: true, // resolves Jan 31 — imminent!
     },
     
-    // ═══ FED & ECONOMICS ═══
+    // ═══ FED & ECONOMICS (only upcoming decisions) ═══
     {
         name: 'Fed Decision March 2026',
         polySlug: 'fed-decision-in-march-885',
         kalshiSeries: 'KXFEDDECISION',
-        kalshiEventFilter: '26MAR', // Only match March 2026 events
+        kalshiEventFilter: '26MAR',
         category: 'economics',
         matchBy: 'name',
-        active: true,
+        active: true, // resolves on Fed meeting day
     },
     {
         name: 'Fed Rate Cuts 2026',
@@ -55,7 +60,7 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXRATECUTCOUNT',
         category: 'economics',
         matchBy: 'name',
-        active: true,
+        active: false, // full-year → too long
     },
     {
         name: 'Large Fed Rate Cut 2026',
@@ -63,27 +68,60 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXLARGECUT',
         category: 'economics',
         matchBy: 'exact',
-        active: true,
+        active: false, // full-year → too long
+    },
+    {
+        name: 'January 2026 CPI',
+        polySlug: 'january-2026-cpi',
+        kalshiSeries: 'KXCPI',
+        kalshiEventFilter: '26JAN',
+        category: 'economics',
+        matchBy: 'name',
+        active: true, // resolves on CPI release day
     },
 
-    // ═══ CRYPTO ═══
+    // ═══ CRYPTO (daily/weekly brackets — high volatility) ═══
     {
         name: 'Bitcoin Price Monthly',
         polySlug: 'what-price-will-bitcoin-hit-in-january',
         kalshiSeries: 'KXBTC',
         category: 'crypto',
-        matchBy: 'strike', // Match by strike/threshold price
+        matchBy: 'strike',
+        active: true,
+    },
+    {
+        name: 'Bitcoin Daily',
+        polySlug: 'bitcoin-above-on-january-30',
+        kalshiSeries: 'KXBTCD',
+        category: 'crypto',
+        matchBy: 'strike',
+        active: true, // daily resolution!
+    },
+    {
+        name: 'Ethereum Price',
+        polySlug: 'ethereum-above-on-january-30',
+        kalshiSeries: 'KXETH',
+        category: 'crypto',
+        matchBy: 'strike',
+        active: true,
+    },
+    {
+        name: 'Solana Price',
+        polySlug: 'solana-above-on-january-30',
+        kalshiSeries: 'KXSOL',
+        category: 'crypto',
+        matchBy: 'strike',
         active: true,
     },
 
-    // ═══ 2028 ELECTIONS ═══
+    // ═══ 2028 ELECTIONS (deactivated — years away) ═══
     {
         name: '2028 Presidential Election',
         polySlug: 'presidential-election-winner-2028',
         kalshiSeries: 'KXPRES28',
         category: 'politics',
         matchBy: 'name',
-        active: true,
+        active: false, // 1000+ days out
     },
     {
         name: '2028 Democratic Nominee',
@@ -91,7 +129,7 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXDEM28',
         category: 'politics',
         matchBy: 'name',
-        active: true,
+        active: false, // 1000+ days out
     },
     {
         name: '2028 Republican Nominee',
@@ -99,27 +137,27 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXREP28',
         category: 'politics',
         matchBy: 'name',
-        active: true,
+        active: false, // 1000+ days out
     },
 
-    // ═══ GEOPOLITICS ═══
+    // ═══ GEOPOLITICS (deactivated — open-ended) ═══
     {
         name: 'US Strikes Iran',
         polySlug: 'us-strikes-iran-by',
         kalshiSeries: 'KXUSSTRIKE',
         category: 'geopolitics',
         matchBy: 'name',
-        active: true,
+        active: false, // no near-term resolution date
     },
 
-    // ═══ SPORTS ═══
+    // ═══ SPORTS (keep — resolve on game day) ═══
     {
         name: 'Super Bowl 2026',
         polySlug: 'super-bowl-champion-2026',
         kalshiSeries: 'KXNFLSB',
         category: 'sports',
         matchBy: 'name',
-        active: true,
+        active: true, // Feb 8 — close!
     },
     {
         name: 'NBA Champion 2026',
@@ -127,7 +165,7 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXNBACHAMP',
         category: 'sports',
         matchBy: 'name',
-        active: true,
+        active: false, // June — too far
     },
     {
         name: 'FIFA World Cup 2026',
@@ -135,7 +173,7 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXFIFAWC',
         category: 'sports',
         matchBy: 'name',
-        active: true,
+        active: false, // Summer 2026 — too far
     },
 ];
 

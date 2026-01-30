@@ -32,4 +32,8 @@ export const config = {
 
   // Minimum price threshold - skip markets where YES or NO is <= this value (in cents)
   minPriceThreshold: 2,
+
+  // Maximum days to expiry — skip markets resolving further out than this
+  // Keeps capital turnover fast: crypto dailies, weekly events, imminent politics
+  maxDaysToExpiry: 7,
 };
