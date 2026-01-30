@@ -195,6 +195,9 @@ export async function resolvePair(pair, fetchKalshi) {
                 try { tokenIds = JSON.parse(tokenIds); } catch(e) {}
             }
 
+            // Resolution date — use Kalshi's expiration (more precise) or Poly's end date
+            const expiresAt = km.expected_expiration_time || km.expiration_time || pm.endDate || null;
+
             return {
                 name: overrideName || pm.question || pm.groupItemTitle || pair.name,
                 category: pair.category,
@@ -213,6 +216,8 @@ export async function resolvePair(pair, fetchKalshi) {
                 kalshiNoBid: km.no_bid || 0,
                 polyVolume: parseFloat(pm.volume || 0),
                 kalshiVolume: km.volume || 0,
+                // When this market resolves / pays out
+                expiresAt,
             };
         };
 

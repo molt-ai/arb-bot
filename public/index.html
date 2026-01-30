@@ -164,11 +164,12 @@
         <div class="card">
             <h2>🔥 Live Opportunities</h2>
             <div class="scrollable">
-                <div class="opp-row header">
+                <div class="opp-row header" style="grid-template-columns: 2fr 60px 60px 60px 70px 55px;">
                     <span>Market</span>
                     <span>Gross</span>
                     <span>Fees</span>
                     <span>Net</span>
+                    <span>Resolves</span>
                     <span>Signal</span>
                 </div>
                 <div id="opportunities">
@@ -180,12 +181,12 @@
         <div class="card">
             <h2>📂 Open Positions (Hold to Resolution)</h2>
             <div class="scrollable">
-                <div class="pos-row header">
+                <div class="pos-row header" style="grid-template-columns: 2fr 80px 70px 70px 100px;">
                     <span>Market</span>
                     <span>Sides</span>
                     <span>Cost</span>
                     <span>Net Profit</span>
-                    <span>Hold Time</span>
+                    <span>Pays Out</span>
                 </div>
                 <div id="positions">
                     <div style="padding: 20px; text-align: center; color: #6b6b88;">No positions — waiting for profitable spreads</div>
@@ -260,15 +261,28 @@
             const posEl = document.getElementById('positions');
             if (p.positions?.length > 0) {
                 posEl.innerHTML = p.positions.map(pos => {
-                    const holdMs = Date.now() - new Date(pos.entryTime).getTime();
-                    const holdMin = Math.floor(holdMs / 60000);
-                    const holdStr = holdMin < 60 ? holdMin + 'm' : Math.floor(holdMin/60) + 'h ' + (holdMin%60) + 'm';
-                    return `<div class="pos-row">
+                    let payoutStr = '—';
+                    if (pos.expiresAt) {
+                        const exp = new Date(pos.expiresAt);
+                        const now = new Date();
+                        const diffMs = exp - now;
+                        if (diffMs < 0) {
+                            payoutStr = 'Expired';
+                        } else if (diffMs < 3600000) {
+                            payoutStr = Math.ceil(diffMs/60000) + 'm left';
+                        } else if (diffMs < 86400000) {
+                            payoutStr = Math.ceil(diffMs/3600000) + 'h left';
+                        } else {
+                            const days = Math.ceil(diffMs/86400000);
+                            payoutStr = days + 'd — ' + exp.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+                        }
+                    }
+                    return `<div class="pos-row" style="grid-template-columns: 2fr 80px 70px 70px 100px;">
                         <span class="opp-name">${pos.name}</span>
                         <span>P:${pos.polySide} K:${pos.kalshiSide}</span>
                         <span>$${(pos.totalCost/100).toFixed(2)}</span>
                         <span class="pnl positive">+$${(pos.expectedNetProfit/100).toFixed(2)}</span>
-                        <span>${holdStr}</span>
+                        <span style="color:#60a5fa;font-size:0.75rem;">${payoutStr}</span>
                     </div>`;
                 }).join('');
             } else {
@@ -314,12 +328,22 @@
                 const net = o.netProfit ?? (gross - fees);
                 const signal = o.isProfitable ? 'arb' : (gross > 0 ? 'watch' : 'no');
                 const netClass = net > 0 ? 'positive' : net < -2 ? 'negative' : 'neutral';
+                
+                let resolveStr = '—';
+                if (o.expiresAt) {
+                    const exp = new Date(o.expiresAt);
+                    const diffMs = exp - new Date();
+                    if (diffMs < 3600000) resolveStr = Math.ceil(diffMs/60000) + 'm';
+                    else if (diffMs < 86400000) resolveStr = Math.ceil(diffMs/3600000) + 'h';
+                    else resolveStr = Math.ceil(diffMs/86400000) + 'd';
+                }
                     
-                return `<div class="opp-row">
+                return `<div class="opp-row" style="grid-template-columns: 2fr 60px 60px 60px 70px 55px;">
                     <span class="opp-name">${o.name || '?'}</span>
                     <span class="spread ${gross > 0 ? 'positive' : 'negative'}">${gross.toFixed(1)}¢</span>
                     <span style="color:#f87171;font-size:0.78rem;">-${fees.toFixed(1)}¢</span>
                     <span class="spread ${netClass}">${net.toFixed(1)}¢</span>
+                    <span style="color:#60a5fa;font-size:0.72rem;">${resolveStr}</span>
                     <span><span class="badge ${signal}">${signal === 'arb' ? '✅ ARB' : signal === 'watch' ? '👀' : '✗'}</span></span>
                 </div>`;
             }).join('');

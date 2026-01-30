@@ -125,7 +125,7 @@ export class PaperTrader {
      * Execute a paper trade — only if profitable after fees on resolution
      */
     executeTrade(opportunity) {
-        const { name, strategy, polyYes, polyNo, kalshiYes, kalshiNo } = opportunity;
+        const { name, strategy, polyYes, polyNo, kalshiYes, kalshiNo, expiresAt } = opportunity;
 
         // Determine sides
         let polyPrice, kalshiPrice, polySide, kalshiSide;
@@ -171,6 +171,7 @@ export class PaperTrader {
             grossSpread: arb.grossSpread,
             fees: totalFees,
             expectedNetProfit: arb.netProfit * this.contractSize,
+            expiresAt: expiresAt || null,
             entryTime: now.toISOString(),
             entryTimestamp: Date.now()
         };

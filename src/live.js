@@ -125,6 +125,7 @@ class LiveBot {
                             polyNo: r.polyNo,
                             kalshiYes: r.kalshiYes,
                             kalshiNo: r.kalshiNo,
+                            expiresAt: r.expiresAt,
                         });
                         added++;
                     }
@@ -437,6 +438,7 @@ class LiveBot {
             kalshiNo: kalshi.no,
             polySource: poly.source || 'ws',
             kalshiSource: kalshi.source || 'rest',
+            expiresAt: mapping.expiresAt || null,
             lastUpdate: Date.now()
         };
 
