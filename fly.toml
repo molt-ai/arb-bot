@@ -1,0 +1,15 @@
+app = "molt-arb-bot"
+primary_region = "iad"  # Virginia — close to exchanges
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 3456
+  force_https = true
+  auto_stop_machines = false  # Keep running 24/7
+  auto_start_machines = true
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
