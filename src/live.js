@@ -20,10 +20,7 @@ class LiveBot {
     constructor() {
         this.config = {
             ...config,
-            alertThresholdCents: 2.0,
-            totalFeeCents: 0,       // Paper mode: gross spreads
-            realFeeCents: 4.0,      // Display-only: what real fees would be
-            minProfitCents: 0.3,    // Trade on any gross spread > 0.3¢
+            alertThresholdCents: 3.0,  // Alert only on real opportunities
         };
 
         this.polymarket = new pmxt.polymarket({ privateKey: this.config.polymarketPrivateKey });
@@ -31,9 +28,12 @@ class LiveBot {
 
         this.scanner = new MarketScanner(this.config);
         this.trader = new PaperTrader({
-            initialBalance: 1000,
-            contractSize: 100,
-            totalFeeCents: this.config.totalFeeCents
+            initialBalance: 500,        // $500 per side
+            contractSize: 10,           // $10 per trade (10 contracts × $1 each)
+            polyFeePct: 0.02,           // ~2% Polymarket spread cost
+            kalshiFeePct: 0.03,         // ~3% Kalshi fee + spread
+            minNetProfit: 1.0,          // Only trade if ≥1¢/contract after fees
+            maxOpenPositions: 20,
         });
 
         // State
@@ -409,33 +409,36 @@ class LiveBot {
         const kalshi = this.kalshiPrices.get(mapping.kalshiTicker);
         if (!poly || !kalshi) return;
 
-        const fees = this.config.totalFeeCents;
-        const strat1 = 100 - poly.yes - kalshi.no - fees;
-        const strat2 = 100 - poly.no - kalshi.yes - fees;
+        // Calculate both strategies using resolution arb math
+        // Strategy 1: Buy Poly YES + Kalshi NO
+        const cost1 = poly.yes + kalshi.no;
+        const gross1 = 100 - cost1;
+        const arb1 = this.trader.calcResolutionProfit(poly.yes, kalshi.no);
 
-        const bestProfit = Math.max(strat1, strat2);
-        const strategy = strat1 > strat2 ? 1 : 2;
+        // Strategy 2: Buy Poly NO + Kalshi YES
+        const cost2 = poly.no + kalshi.yes;
+        const gross2 = 100 - cost2;
+        const arb2 = this.trader.calcResolutionProfit(poly.no, kalshi.yes);
 
-        // Real fees for display
-        const grossSpread = Math.max(
-            100 - poly.yes - kalshi.no,
-            100 - poly.no - kalshi.yes
-        );
+        const bestArb = arb1.netProfit > arb2.netProfit ? arb1 : arb2;
+        const strategy = arb1.netProfit > arb2.netProfit ? 1 : 2;
+        const grossSpread = Math.max(gross1, gross2);
 
-        // Update opportunities
         const opp = {
             name: mapping.name,
-            profit: bestProfit,
-            netProfit: bestProfit,
+            profit: bestArb.netProfit,
+            netProfit: bestArb.netProfit,
             grossSpread,
-            afterFees: grossSpread - this.config.realFeeCents,
+            totalCost: bestArb.totalCost,
+            fees: bestArb.fees,
+            isProfitable: bestArb.isProfitable,
             strategy,
             polyYes: poly.yes,
             polyNo: poly.no,
             kalshiYes: kalshi.yes,
             kalshiNo: kalshi.no,
-            polySource: poly.source,
-            kalshiSource: kalshi.source,
+            polySource: poly.source || 'ws',
+            kalshiSource: kalshi.source || 'rest',
             lastUpdate: Date.now()
         };
 
@@ -448,35 +451,35 @@ class LiveBot {
         this.currentOpportunities.sort((a, b) => b.netProfit - a.netProfit);
         this.lastUpdate = new Date().toISOString();
 
-        // Paper trade
-        if (bestProfit >= this.config.minProfitCents) {
-            const trade = this.trader.executeTrade(opp);
-            if (trade) {
-                console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: ${(trade.totalCost/100).toFixed(2)}¢ | Exp: +${(trade.expectedProfit/100).toFixed(2)}¢ | Gross: ${grossSpread.toFixed(1)}¢ (−${this.config.realFeeCents}¢ fees)`);
-                if (this.dashboard) {
-                    this.dashboard.broadcast('trade', trade);
-                    this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
-                }
+        // Paper trade — trader checks profitability internally
+        const trade = this.trader.executeTrade(opp);
+        if (trade) {
+            const net = (trade.expectedNetProfit / 100).toFixed(2);
+            const fee = (trade.fees / 100).toFixed(2);
+            console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: $${(trade.totalCost/100).toFixed(2)} | Gross: ${trade.grossSpread.toFixed(1)}¢ | Fees: $${fee} | Net: +$${net}`);
+            if (this.dashboard) {
+                this.dashboard.broadcast('trade', trade);
+                this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
             }
         }
 
-        // Alert big opportunities
-        if (bestProfit >= this.config.alertThresholdCents) {
+        // Alert real opportunities (profitable after fees)
+        if (bestArb.isProfitable && bestArb.netProfit >= this.config.alertThresholdCents) {
             const desc = strategy === 1
-                ? `Poly YES (${poly.yes.toFixed(1)}¢) + Kalshi NO (${kalshi.no.toFixed(1)}¢)`
-                : `Poly NO (${poly.no.toFixed(1)}¢) + Kalshi YES (${kalshi.yes.toFixed(1)}¢)`;
-            sendAlert({ outcome: mapping.name, profit: bestProfit, description: desc }).catch(() => {});
+                ? `Poly YES (${poly.yes.toFixed(1)}¢) + Kalshi NO (${kalshi.no.toFixed(1)}¢) = ${bestArb.totalCost.toFixed(1)}¢ cost → ${bestArb.netProfit.toFixed(1)}¢ net profit`
+                : `Poly NO (${poly.no.toFixed(1)}¢) + Kalshi YES (${kalshi.yes.toFixed(1)}¢) = ${bestArb.totalCost.toFixed(1)}¢ cost → ${bestArb.netProfit.toFixed(1)}¢ net profit`;
+            sendAlert({ outcome: mapping.name, profit: bestArb.netProfit, description: desc }).catch(() => {});
         }
     }
 
     // ── Tick (every 10s) ────────────────────────────────────
 
     tick() {
-        // Exit positions when spread disappears
+        // Check stop-loss exits (only on massive reversals)
         const closed = this.trader.checkExits(this.currentOpportunities);
         for (const trade of closed) {
-            const pnl = trade.pnl >= 0 ? `+${(trade.pnl/100).toFixed(2)}` : `${(trade.pnl/100).toFixed(2)}`;
-            console.log(`📉 EXIT  ${trade.name} | P&L: ${pnl}¢ | Hold: ${Math.round(trade.holdTime/1000)}s`);
+            const net = trade.netPnl >= 0 ? `+$${(trade.netPnl/100).toFixed(2)}` : `-$${Math.abs(trade.netPnl/100).toFixed(2)}`;
+            console.log(`📉 STOP-LOSS ${trade.name} | Net: ${net} | Hold: ${Math.round(trade.holdTime/1000)}s`);
             if (this.dashboard) {
                 this.dashboard.broadcast('trade', trade);
                 this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
@@ -487,10 +490,12 @@ class LiveBot {
             this.dashboard.broadcast('opportunities', this.currentOpportunities);
         }
 
+        // Count profitable opportunities
+        const profitable = this.currentOpportunities.filter(o => o.isProfitable).length;
         const p = this.trader.getPortfolioSummary();
         const pWs = this.polyConnected ? '🟢' : '🔴';
-        const kWs = this.kalshiConnected ? '🟢' : '🔴';
-        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} | ${this.currentOpportunities.length} opps | ${p.openPositions} pos | P&L: $${p.totalPnL} | Trades: ${p.totalTrades}`);
+        const kWs = this.kalshiConnected ? '🟢' : (this.kalshiRestMode ? '🔄' : '🔴');
+        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} | ${this.currentOpportunities.length} scanned (${profitable} profitable) | ${p.openPositions} pos | Net P&L: $${p.netPnL} | Fees: $${p.totalFeesPaid} | Trades: ${p.totalTrades}`);
     }
 
     stop() {

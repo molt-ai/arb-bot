@@ -10,112 +10,128 @@
         
         .header { 
             background: linear-gradient(135deg, #12121a 0%, #1a1a2e 100%);
-            padding: 20px 24px; border-bottom: 1px solid #2a2a3a;
+            padding: 16px 24px; border-bottom: 1px solid #2a2a3a;
             display: flex; justify-content: space-between; align-items: center;
         }
-        .header h1 { font-size: 1.3rem; color: #7c8aff; }
-        .header .status { font-size: 0.8rem; color: #4ade80; }
-        .header .status.offline { color: #f87171; }
+        .header h1 { font-size: 1.2rem; color: #7c8aff; }
+        .header .controls { display: flex; gap: 8px; align-items: center; }
+        .status { font-size: 0.75rem; }
+        .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+        .dot.green { background: #4ade80; }
+        .dot.red { background: #f87171; }
+        .dot.yellow { background: #facc15; }
         
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; max-width: 1400px; margin: 0 auto; padding-bottom: 60px; }
         @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
         
         .card {
-            background: #12121a; border: 1px solid #2a2a3a; border-radius: 12px;
-            padding: 20px; overflow: hidden;
+            background: #12121a; border: 1px solid #2a2a3a; border-radius: 10px;
+            padding: 16px; overflow: hidden;
         }
         .card.full { grid-column: 1 / -1; }
-        .card h2 { font-size: 0.95rem; color: #8888aa; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .card h2 { font-size: 0.85rem; color: #8888aa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
         
-        /* Portfolio Stats */
-        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
-        .stat { text-align: center; }
-        .stat .value { font-size: 1.6rem; font-weight: 700; color: #fff; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+        .stat { text-align: center; padding: 8px; background: #0d0d14; border-radius: 8px; }
+        .stat .value { font-size: 1.4rem; font-weight: 700; color: #fff; }
         .stat .value.green { color: #4ade80; }
         .stat .value.red { color: #f87171; }
-        .stat .label { font-size: 0.75rem; color: #6b6b88; margin-top: 4px; }
+        .stat .value.yellow { color: #facc15; }
+        .stat .label { font-size: 0.7rem; color: #6b6b88; margin-top: 2px; }
         
-        /* Opportunities Table */
-        .opp-list { max-height: 400px; overflow-y: auto; }
+        .scrollable { max-height: 380px; overflow-y: auto; }
+        
+        /* Opportunities */
         .opp-row {
-            display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 80px;
-            padding: 10px 0; border-bottom: 1px solid #1a1a2a; align-items: center;
-            font-size: 0.85rem;
+            display: grid; grid-template-columns: 2fr 80px 80px 80px 70px;
+            padding: 8px 0; border-bottom: 1px solid #1a1a2a; align-items: center;
+            font-size: 0.8rem;
         }
-        .opp-row.header { color: #6b6b88; font-size: 0.75rem; text-transform: uppercase; border-bottom: 1px solid #2a2a3a; }
-        .opp-row .name { color: #c8c8e0; font-weight: 500; }
-        .opp-row .spread { font-weight: 700; }
-        .opp-row .spread.positive { color: #4ade80; }
-        .opp-row .spread.negative { color: #f87171; }
-        .opp-row .volume { color: #8888aa; }
-        .opp-row .badge {
-            font-size: 0.7rem; padding: 2px 8px; border-radius: 4px;
-            text-align: center; font-weight: 600;
+        .opp-row.header { color: #6b6b88; font-size: 0.7rem; text-transform: uppercase; border-bottom: 1px solid #2a2a3a; }
+        .opp-name { color: #c8c8e0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .spread { font-weight: 700; }
+        .spread.positive { color: #4ade80; }
+        .spread.negative { color: #f87171; }
+        .spread.neutral { color: #facc15; }
+        .source-tag { font-size: 0.6rem; color: #555; }
+        .badge {
+            font-size: 0.65rem; padding: 2px 6px; border-radius: 4px;
+            text-align: center; font-weight: 600; display: inline-block;
         }
-        .badge.buy { background: #1a3a2a; color: #4ade80; }
-        .badge.hold { background: #2a2a1a; color: #facc15; }
+        .badge.arb { background: #1a3a2a; color: #4ade80; }
+        .badge.watch { background: #2a2a1a; color: #facc15; }
+        .badge.no { background: #2a1a1a; color: #f87171; }
         
         /* Trade Log */
-        .trade-list { max-height: 350px; overflow-y: auto; }
         .trade-row {
-            display: grid; grid-template-columns: 80px 2fr 1fr 1fr 100px;
-            padding: 8px 0; border-bottom: 1px solid #1a1a2a;
-            font-size: 0.82rem;
+            display: grid; grid-template-columns: 65px 70px 2fr 90px 90px 80px;
+            padding: 7px 0; border-bottom: 1px solid #1a1a2a;
+            font-size: 0.78rem; align-items: center;
         }
-        .trade-row.header { color: #6b6b88; font-size: 0.75rem; text-transform: uppercase; }
-        .trade-type { font-weight: 700; }
+        .trade-row.header { color: #6b6b88; font-size: 0.7rem; text-transform: uppercase; }
+        .trade-time { color: #555; font-size: 0.72rem; font-family: monospace; }
+        .trade-type { font-weight: 700; font-size: 0.72rem; }
         .trade-type.entry { color: #60a5fa; }
-        .trade-type.exit { color: #c084fc; }
-        .trade-pnl.positive { color: #4ade80; font-weight: 600; }
-        .trade-pnl.negative { color: #f87171; font-weight: 600; }
+        .trade-type.resolve { color: #a78bfa; }
+        .trade-type.exit { color: #f97316; }
+        .pnl.positive { color: #4ade80; font-weight: 600; }
+        .pnl.negative { color: #f87171; font-weight: 600; }
         
         /* Positions */
         .pos-row {
-            display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
-            padding: 8px 0; border-bottom: 1px solid #1a1a2a;
-            font-size: 0.82rem;
+            display: grid; grid-template-columns: 2fr 1fr 80px 80px 80px;
+            padding: 7px 0; border-bottom: 1px solid #1a1a2a;
+            font-size: 0.8rem; align-items: center;
         }
-        .pos-row.header { color: #6b6b88; font-size: 0.75rem; text-transform: uppercase; }
+        .pos-row.header { color: #6b6b88; font-size: 0.7rem; text-transform: uppercase; }
         
-        /* Bottom bar */
         .bottom-bar {
             position: fixed; bottom: 0; left: 0; right: 0;
             background: #12121a; border-top: 1px solid #2a2a3a;
             padding: 8px 24px; display: flex; justify-content: space-between;
-            font-size: 0.75rem; color: #6b6b88;
+            font-size: 0.72rem; color: #6b6b88;
         }
-        
-        .pulse { animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         
         button {
             background: #2a2a3a; color: #8888aa; border: 1px solid #3a3a4a;
-            padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+            padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem;
         }
         button:hover { background: #3a3a4a; color: #fff; }
+
+        .fee-note { font-size: 0.7rem; color: #555; margin-top: 6px; font-style: italic; }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>🎯 Arb Bot — Live Dashboard</h1>
-        <div>
-            <span class="status" id="ws-status">● Connecting...</span>
-            <button onclick="resetPortfolio()" style="margin-left: 12px;">Reset Portfolio</button>
+        <div class="controls">
+            <div class="status">
+                <span id="poly-status"><span class="dot green"></span>Poly WS</span>
+                <span style="margin-left:8px;" id="kalshi-status"><span class="dot yellow"></span>Kalshi REST</span>
+            </div>
+            <button onclick="resetPortfolio()" style="margin-left: 12px;">Reset</button>
         </div>
     </div>
 
     <div class="grid">
-        <!-- Portfolio Overview -->
         <div class="card full">
-            <h2>📊 Portfolio</h2>
+            <h2>📊 Portfolio — $500 per side</h2>
             <div class="stats">
                 <div class="stat">
-                    <div class="value" id="total-value">$20.00</div>
+                    <div class="value" id="total-value">$1,000</div>
                     <div class="label">Total Value</div>
                 </div>
                 <div class="stat">
-                    <div class="value" id="total-pnl">$0.00</div>
-                    <div class="label">Total P&L</div>
+                    <div class="value green" id="net-pnl">$0.00</div>
+                    <div class="label">Net P&L (after fees)</div>
+                </div>
+                <div class="stat">
+                    <div class="value yellow" id="gross-pnl">$0.00</div>
+                    <div class="label">Gross P&L</div>
+                </div>
+                <div class="stat">
+                    <div class="value red" id="fees-paid">$0.00</div>
+                    <div class="label">Fees Paid</div>
                 </div>
                 <div class="stat">
                     <div class="value" id="total-trades">0</div>
@@ -130,166 +146,156 @@
                     <div class="label">Open Positions</div>
                 </div>
                 <div class="stat">
-                    <div class="value" id="poly-balance">$10.00</div>
+                    <div class="value" id="expected-profit">$0.00</div>
+                    <div class="label">Expected (if held)</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="poly-balance">$500</div>
                     <div class="label">Poly Balance</div>
                 </div>
                 <div class="stat">
-                    <div class="value" id="kalshi-balance">$10.00</div>
+                    <div class="value" id="kalshi-balance">$500</div>
                     <div class="label">Kalshi Balance</div>
                 </div>
-                <div class="stat">
-                    <div class="value" id="best-trade">—</div>
-                    <div class="label">Best Trade</div>
-                </div>
             </div>
+            <div class="fee-note">Fees: ~2% Polymarket + ~3% Kalshi per contract. Only enters trades profitable AFTER fees. Holds to resolution for guaranteed payout.</div>
         </div>
 
-        <!-- Live Opportunities -->
         <div class="card">
             <h2>🔥 Live Opportunities</h2>
-            <div class="opp-list">
+            <div class="scrollable">
                 <div class="opp-row header">
                     <span>Market</span>
-                    <span>Net Spread</span>
-                    <span>Poly</span>
-                    <span>Kalshi</span>
-                    <span>Action</span>
+                    <span>Gross</span>
+                    <span>Fees</span>
+                    <span>Net</span>
+                    <span>Signal</span>
                 </div>
                 <div id="opportunities">
-                    <div style="padding: 20px; text-align: center; color: #6b6b88;">Waiting for data...</div>
+                    <div style="padding: 20px; text-align: center; color: #6b6b88;">Scanning markets...</div>
                 </div>
             </div>
         </div>
 
-        <!-- Open Positions -->
         <div class="card">
-            <h2>📂 Open Positions</h2>
-            <div class="pos-row header">
-                <span>Market</span>
-                <span>Side</span>
-                <span>Entry Cost</span>
-                <span>Expected P&L</span>
-                <span>Hold Time</span>
-            </div>
-            <div id="positions">
-                <div style="padding: 20px; text-align: center; color: #6b6b88;">No open positions</div>
+            <h2>📂 Open Positions (Hold to Resolution)</h2>
+            <div class="scrollable">
+                <div class="pos-row header">
+                    <span>Market</span>
+                    <span>Sides</span>
+                    <span>Cost</span>
+                    <span>Net Profit</span>
+                    <span>Hold Time</span>
+                </div>
+                <div id="positions">
+                    <div style="padding: 20px; text-align: center; color: #6b6b88;">No positions — waiting for profitable spreads</div>
+                </div>
             </div>
         </div>
 
-        <!-- Trade Log -->
         <div class="card full">
-            <h2>📋 Trade Log</h2>
-            <div class="trade-list">
+            <h2>📋 Trade History</h2>
+            <div class="scrollable">
                 <div class="trade-row header">
+                    <span>Time</span>
                     <span>Type</span>
                     <span>Market</span>
-                    <span>Strategy</span>
-                    <span>Cost/Value</span>
-                    <span>P&L</span>
+                    <span>Cost</span>
+                    <span>Fees</span>
+                    <span>Net P&L</span>
                 </div>
                 <div id="trades">
-                    <div style="padding: 20px; text-align: center; color: #6b6b88;">No trades yet — bot is scanning...</div>
+                    <div style="padding: 20px; text-align: center; color: #6b6b88;">No trades yet — bot only enters when profitable after fees</div>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="bottom-bar">
-        <span>Paper Trading Mode — $1,000 per side simulated</span>
+        <span>Paper Trading — Resolution Arb Strategy — Fees Included</span>
         <span id="last-update">Last update: —</span>
     </div>
 
     <script>
         let ws;
-        let reconnectTimer;
 
         function connect() {
             const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${proto}//${location.host}`);
-
-            ws.onopen = () => {
-                document.getElementById('ws-status').textContent = '● Live';
-                document.getElementById('ws-status').className = 'status';
-            };
-
-            ws.onclose = () => {
-                document.getElementById('ws-status').textContent = '● Disconnected';
-                document.getElementById('ws-status').className = 'status offline';
-                reconnectTimer = setTimeout(connect, 3000);
-            };
-
-            ws.onmessage = (event) => {
-                const msg = JSON.parse(event.data);
-                handleMessage(msg);
-            };
+            ws.onopen = () => {};
+            ws.onclose = () => setTimeout(connect, 3000);
+            ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
         }
 
         function handleMessage(msg) {
-            document.getElementById('last-update').textContent = 
-                'Last update: ' + new Date(msg.timestamp).toLocaleTimeString();
-
-            if (msg.type === 'init' || msg.type === 'portfolio') {
-                updatePortfolio(msg.data.portfolio || msg.data);
-            }
-            if (msg.type === 'init' || msg.type === 'opportunities') {
-                updateOpportunities(msg.data.opportunities || msg.data);
-            }
-            if (msg.type === 'trade') {
-                // Refresh portfolio after trade
-                fetch('/api/portfolio').then(r => r.json()).then(updatePortfolio);
-            }
+            document.getElementById('last-update').textContent = 'Last update: ' + new Date(msg.timestamp).toLocaleTimeString();
+            if (msg.type === 'init' || msg.type === 'portfolio') updatePortfolio(msg.data.portfolio || msg.data);
+            if (msg.type === 'init' || msg.type === 'opportunities') updateOpportunities(msg.data.opportunities || msg.data);
+            if (msg.type === 'trade') fetch('/api/portfolio').then(r => r.json()).then(updatePortfolio);
         }
 
         function updatePortfolio(p) {
             if (!p) return;
             document.getElementById('total-value').textContent = '$' + p.totalValue;
             
-            const pnlEl = document.getElementById('total-pnl');
-            const pnl = parseFloat(p.totalPnL);
-            pnlEl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
-            pnlEl.className = 'value ' + (pnl >= 0 ? 'green' : 'red');
-            
+            const netPnl = parseFloat(p.netPnL);
+            const netEl = document.getElementById('net-pnl');
+            netEl.textContent = (netPnl >= 0 ? '+$' : '-$') + Math.abs(netPnl).toFixed(2);
+            netEl.className = 'value ' + (netPnl >= 0 ? 'green' : 'red');
+
+            const grossPnl = parseFloat(p.grossPnL);
+            const grossEl = document.getElementById('gross-pnl');
+            grossEl.textContent = (grossPnl >= 0 ? '+$' : '-$') + Math.abs(grossPnl).toFixed(2);
+            grossEl.className = 'value ' + (grossPnl >= 0 ? 'green' : 'red');
+
+            document.getElementById('fees-paid').textContent = '$' + p.totalFeesPaid;
             document.getElementById('total-trades').textContent = p.totalTrades;
             document.getElementById('win-rate').textContent = p.winRate + '%';
             document.getElementById('open-positions').textContent = p.openPositions;
+            document.getElementById('expected-profit').textContent = '+$' + p.expectedProfit;
             document.getElementById('poly-balance').textContent = '$' + p.polyBalance;
             document.getElementById('kalshi-balance').textContent = '$' + p.kalshiBalance;
-            document.getElementById('best-trade').textContent = p.bestTrade 
-                ? (p.bestTrade.pnl > 0 ? '+' : '') + (p.bestTrade.pnl / 100).toFixed(2) + '¢'
-                : '—';
 
             // Positions
             const posEl = document.getElementById('positions');
-            if (p.positions && p.positions.length > 0) {
+            if (p.positions?.length > 0) {
                 posEl.innerHTML = p.positions.map(pos => {
                     const holdMs = Date.now() - new Date(pos.entryTime).getTime();
                     const holdMin = Math.floor(holdMs / 60000);
                     const holdStr = holdMin < 60 ? holdMin + 'm' : Math.floor(holdMin/60) + 'h ' + (holdMin%60) + 'm';
                     return `<div class="pos-row">
-                        <span>${pos.name}</span>
+                        <span class="opp-name">${pos.name}</span>
                         <span>P:${pos.polySide} K:${pos.kalshiSide}</span>
-                        <span>${(pos.totalCost/100).toFixed(2)}¢</span>
-                        <span class="trade-pnl positive">+${(pos.expectedProfit/100).toFixed(2)}¢</span>
+                        <span>$${(pos.totalCost/100).toFixed(2)}</span>
+                        <span class="pnl positive">+$${(pos.expectedNetProfit/100).toFixed(2)}</span>
                         <span>${holdStr}</span>
                     </div>`;
                 }).join('');
             } else {
-                posEl.innerHTML = '<div style="padding:20px;text-align:center;color:#6b6b88;">No open positions</div>';
+                posEl.innerHTML = '<div style="padding:20px;text-align:center;color:#6b6b88;">No positions — waiting for profitable spreads</div>';
             }
 
             // Trades
-            if (p.recentTrades && p.recentTrades.length > 0) {
-                const tradesEl = document.getElementById('trades');
-                tradesEl.innerHTML = p.recentTrades.map(t => {
+            if (p.recentTrades?.length > 0) {
+                document.getElementById('trades').innerHTML = p.recentTrades.map(t => {
+                    const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : (t.entryTime ? new Date(t.entryTime).toLocaleTimeString() : '—');
                     const isEntry = t.type === 'ENTRY';
-                    const pnl = t.pnl ? (t.pnl/100).toFixed(2) : '—';
-                    const pnlClass = t.pnl > 0 ? 'positive' : t.pnl < 0 ? 'negative' : '';
+                    const isResolve = t.type === 'RESOLVE';
+                    const typeClass = isEntry ? 'entry' : isResolve ? 'resolve' : 'exit';
+                    const typeLabel = isEntry ? 'BUY' : isResolve ? 'RESOLVE' : 'EXIT';
+                    const cost = isEntry ? '$' + (t.totalCost/100).toFixed(2) : (t.payout ? '$' + (t.payout/100).toFixed(2) : '—');
+                    const fees = t.fees ? '$' + (t.fees/100).toFixed(2) : '—';
+                    const netPnl = t.netPnl ?? t.netPnl ?? null;
+                    const pnlStr = netPnl !== null ? ((netPnl >= 0 ? '+$' : '-$') + Math.abs(netPnl/100).toFixed(2)) : '—';
+                    const pnlClass = netPnl > 0 ? 'positive' : netPnl < 0 ? 'negative' : '';
+                    
                     return `<div class="trade-row">
-                        <span class="trade-type ${isEntry ? 'entry' : 'exit'}">${t.type}</span>
-                        <span>${t.name}</span>
-                        <span>P:${t.polySide} K:${t.kalshiSide}</span>
-                        <span>${isEntry ? (t.totalCost/100).toFixed(2) + '¢' : '—'}</span>
-                        <span class="trade-pnl ${pnlClass}">${isEntry ? '—' : (t.pnl > 0 ? '+' : '') + pnl + '¢'}</span>
+                        <span class="trade-time">${time}</span>
+                        <span class="trade-type ${typeClass}">${typeLabel}</span>
+                        <span class="opp-name">${t.name}</span>
+                        <span>${cost}</span>
+                        <span>${fees}</span>
+                        <span class="pnl ${pnlClass}">${isEntry ? 'holding' : pnlStr}</span>
                     </div>`;
                 }).join('');
             }
@@ -297,39 +303,34 @@
 
         function updateOpportunities(opps) {
             const el = document.getElementById('opportunities');
-            if (!opps || opps.length === 0) {
-                el.innerHTML = '<div style="padding:20px;text-align:center;color:#6b6b88;">No opportunities found</div>';
+            if (!opps?.length) {
+                el.innerHTML = '<div style="padding:20px;text-align:center;color:#6b6b88;">Scanning markets...</div>';
                 return;
             }
             
-            el.innerHTML = opps.slice(0, 20).map(o => {
-                const spread = o.netProfit || o.profit || 0;
-                const spreadClass = spread > 0 ? 'positive' : 'negative';
-                const action = spread > 2 ? 'buy' : 'hold';
-                const stratStr = (o.strategy === 1) 
-                    ? `Y:${o.polyYes?.toFixed(1)}¢` 
-                    : `N:${o.polyNo?.toFixed(1)}¢`;
-                const kalStr = (o.strategy === 1)
-                    ? `N:${o.kalshiNo?.toFixed(1)}¢`
-                    : `Y:${o.kalshiYes?.toFixed(1)}¢`;
+            el.innerHTML = opps.slice(0, 25).map(o => {
+                const gross = o.grossSpread ?? 0;
+                const fees = o.fees ?? 0;
+                const net = o.netProfit ?? (gross - fees);
+                const signal = o.isProfitable ? 'arb' : (gross > 0 ? 'watch' : 'no');
+                const netClass = net > 0 ? 'positive' : net < -2 ? 'negative' : 'neutral';
                     
                 return `<div class="opp-row">
-                    <span class="name">${o.name || o.outcome || '?'}</span>
-                    <span class="spread ${spreadClass}">${spread.toFixed(2)}¢</span>
-                    <span>${stratStr}</span>
-                    <span>${kalStr}</span>
-                    <span class="badge ${action}">${action.toUpperCase()}</span>
+                    <span class="opp-name">${o.name || '?'}</span>
+                    <span class="spread ${gross > 0 ? 'positive' : 'negative'}">${gross.toFixed(1)}¢</span>
+                    <span style="color:#f87171;font-size:0.78rem;">-${fees.toFixed(1)}¢</span>
+                    <span class="spread ${netClass}">${net.toFixed(1)}¢</span>
+                    <span><span class="badge ${signal}">${signal === 'arb' ? '✅ ARB' : signal === 'watch' ? '👀' : '✗'}</span></span>
                 </div>`;
             }).join('');
         }
 
         async function resetPortfolio() {
-            if (!confirm('Reset portfolio? This clears all trades and resets balance to $1,000/side.')) return;
+            if (!confirm('Reset portfolio to $500/side?')) return;
             await fetch('/api/reset', { method: 'POST' });
             fetch('/api/portfolio').then(r => r.json()).then(updatePortfolio);
         }
 
-        // Poll for updates every 5s as fallback
         setInterval(async () => {
             try {
                 const [portfolio, opps] = await Promise.all([
@@ -338,9 +339,8 @@
                 ]);
                 updatePortfolio(portfolio);
                 updateOpportunities(opps.opportunities);
-                document.getElementById('last-update').textContent = 
-                    'Last update: ' + new Date().toLocaleTimeString();
-            } catch (e) { /* ignore */ }
+                document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
+            } catch (e) {}
         }, 5000);
 
         connect();
