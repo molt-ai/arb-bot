@@ -16,6 +16,7 @@ import { MARKET_PAIRS, POLY_GAMMA, resolvePair } from './market-pairs.js';
 import { BinanceFeed } from './binance-feed.js';
 import { CryptoSpeedStrategy } from './crypto-speed.js';
 import { SameMarketArb } from './same-market-arb.js';
+import { CombinatorialArb } from './combinatorial-arb.js';
 
 const POLY_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const KALSHI_WS_URL = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
@@ -68,13 +69,19 @@ class LiveBot {
         this.binanceFeed = new BinanceFeed();
         this.cryptoSpeed = new CryptoSpeedStrategy(this.binanceFeed, this.trader);
         this.sameMarketArb = new SameMarketArb(this.trader);
+        this.combinatorialArb = new CombinatorialArb(this.trader, {
+            scanIntervalMs: 60_000,     // Every 60s
+            minEdgeCents: 3,            // Min 3¢ edge
+            maxDaysToExpiry: 14,        // 2 weeks out
+            useEmbeddings: false,        // Sync mode on Fly (saves RAM). Set true locally.
+        });
     }
 
     async start() {
-        console.log('╔═══════════════════════════════════════════════╗');
-        console.log('║   🎯 ARB BOT v2 — MULTI-STRATEGY LIVE MODE   ║');
-        console.log('║   Cross-Platform + Crypto Speed + Rebalance   ║');
-        console.log('╚═══════════════════════════════════════════════╝\n');
+        console.log('╔═══════════════════════════════════════════════════╗');
+        console.log('║   🎯 ARB BOT v3 — MULTI-STRATEGY LIVE MODE      ║');
+        console.log('║   XP + Crypto Speed + Rebalance + Combinatorial  ║');
+        console.log('╚═══════════════════════════════════════════════════╝\n');
 
         // 1. Scan & map markets (cross-platform arb)
         await this.scanMarkets();
@@ -93,7 +100,10 @@ class LiveBot {
         // 5. Start same-market rebalancing arb
         await this.sameMarketArb.start();
 
-        // 6. Re-scan periodically
+        // 6. Start combinatorial arb (entity matcher)
+        await this.combinatorialArb.start();
+
+        // 7. Re-scan periodically
         setInterval(() => this.scanMarkets(), SCAN_INTERVAL_MS);
 
         // 7. Tick every 10s — check exits, broadcast state
@@ -102,7 +112,7 @@ class LiveBot {
         // 8. Kalshi REST fallback every 30s (in case WS misses something)
         setInterval(() => this.pollKalshiFallback(), 30000);
 
-        console.log('\n[LIVE] Bot running — 3 strategies active. Dashboard live.\n');
+        console.log('\n[LIVE] Bot running — 4 strategies active. Dashboard live.\n');
     }
 
     // ── Market Discovery (Multi-Category) ─────────────────
@@ -638,7 +648,8 @@ class LiveBot {
         const maxDays = this.config.maxDaysToExpiry || 7;
         const csStats = this.cryptoSpeed.getStats();
         const smStats = this.sameMarketArb.getStats();
-        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} Binance ${bWs} | XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓) CS:${csStats.activeMarkets}mkts/${csStats.signals}sig SM:${smStats.found}found | ${p.openPositions} pos | P&L: $${p.netPnL} | Trades: ${p.totalTrades}`);
+        const caStats = this.combinatorialArb?.stats || {};
+        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} Binance ${bWs} | XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓) CS:${csStats.activeMarkets}mkts/${csStats.signals}sig SM:${smStats.found}found CA:${caStats.opportunitiesFound || 0}opps | ${p.openPositions} pos | P&L: $${p.netPnL} | Trades: ${p.totalTrades}`);
     }
 
     stop() {
@@ -647,6 +658,7 @@ class LiveBot {
         if (this.binanceFeed) this.binanceFeed.stop();
         if (this.cryptoSpeed) this.cryptoSpeed.stop();
         if (this.sameMarketArb) this.sameMarketArb.stop();
+        if (this.combinatorialArb) this.combinatorialArb.stop();
         if (this.dashboard?.server) this.dashboard.server.close();
         console.log('\n[STOPPED]');
     }

@@ -63,6 +63,10 @@ export function createDashboard(bot, trader, config = {}) {
         });
     });
 
+    app.get('/api/combinatorial', (req, res) => {
+        res.json(bot.combinatorialArb?.getState() || { stats: {}, opportunities: [] });
+    });
+
     // WebSocket broadcast
     const broadcast = (type, data) => {
         const msg = JSON.stringify({ type, data, timestamp: Date.now() });
