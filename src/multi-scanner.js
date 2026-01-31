@@ -14,15 +14,17 @@ const POLY_GAMMA = 'https://gamma-api.polymarket.com';
 const KNOWN_PAIRS = [
     // Politics & Government
     { poly: 'who-will-trump-nominate-as-fed-chair', kalshiSeries: 'KXFEDCHAIRNOM', category: 'politics' },
-    { poly: 'will-there-be-another-us-government-shutdown-by-january-31', kalshiSeries: 'KXGOVSHUT', category: 'politics' },
+    { poly: 'will-there-be-another-us-government-shut', kalshiSeries: 'KXGOVSHUT', category: 'politics' },
+    { poly: 'how-long-will-the-next-government-shutdo', kalshiSeries: 'KXGOVSHUTLEN', category: 'politics' },
     { poly: 'fed-decision-in-march-885', kalshiSeries: 'KXFEDDECISION', category: 'economics' },
     { poly: 'presidential-election-winner-2028', kalshiSeries: 'KXPRES', category: 'politics' },
     { poly: 'democratic-presidential-nominee-2028', kalshiSeries: 'KXDEM', category: 'politics' },
     { poly: 'republican-presidential-nominee-2028', kalshiSeries: 'KXREP', category: 'politics' },
     
-    // Crypto  
-    { poly: 'what-price-will-bitcoin-hit-in-january', kalshiSeries: 'KXBTC', category: 'crypto' },
-    { poly: 'bitcoin-above-on-january-30', kalshiSeries: 'KXBTCD', category: 'crypto' },
+    // Crypto — daily, weekly, monthly BTC/ETH price levels
+    { poly: 'what-price-will-bitcoin-hit-in-january-2', kalshiSeries: 'KXBTC', category: 'crypto' },
+    { poly: 'bitcoin-above-on-january-31', kalshiSeries: 'KXBTCD', category: 'crypto' },
+    { poly: 'what-price-will-ethereum-hit-in-january-', kalshiSeries: 'KXETH', category: 'crypto' },
     
     // Economics
     { poly: 'us-recession-2026', kalshiSeries: 'KXRECESSION', category: 'economics' },
@@ -31,6 +33,17 @@ const KNOWN_PAIRS = [
     
     // Geopolitics
     { poly: 'us-strikes-iran-by', kalshiSeries: 'KXUSSTRIKE', category: 'geopolitics' },
+    
+    // Sports (high volume, potential cross-platform)
+    { poly: '2026-fifa-world-cup-winner-595', kalshiSeries: 'KXFIFA', category: 'sports' },
+    { poly: '2026-nba-champion', kalshiSeries: 'KXNBACHAMP', category: 'sports' },
+    { poly: 'nba-mvp-694', kalshiSeries: 'KXNBAMVP', category: 'sports' },
+    
+    // Commodities
+    { poly: 'si-hit-jan-2026', kalshiSeries: 'KXSILVER', category: 'commodities' },
+    
+    // Tesla / Tech
+    { poly: 'tesla-launches-unsupervised-full-self-dr', kalshiSeries: 'KXTESLAFSD', category: 'tech' },
 ];
 
 export class MultiScanner {

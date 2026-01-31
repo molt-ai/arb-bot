@@ -498,10 +498,10 @@ export class CombinatorialArb {
         
         const name = `COMBO: ${opp.type} (${opp.edge}¢)`;
         
-        // Check if we already have this position
+        // Check if we already have this position (by type + event to avoid exact edge matching)
+        const oppKey = `${opp.type}:${opp.event || opp.reason?.substring(0, 30)}`;
         const existing = this.trader.state.positions.find(p => 
-            p.name.includes(opp.type) && 
-            p.name.includes(String(opp.edge))
+            p.oppKey === oppKey
         );
         if (existing) return;
         
@@ -522,11 +522,13 @@ export class CombinatorialArb {
         
         // Add to paper trader as a position
         if (opp.buy) {
+            // Standard pairwise opportunities with explicit buy targets
             const buys = Array.isArray(opp.buy) ? opp.buy : [opp.buy];
             for (const b of buys) {
                 this.trader.state.positions.push({
                     name: `${name} | ${b.market.question?.substring(0, 40)}`,
                     strategy: 'combinatorial',
+                    oppKey,
                     side: b.side,
                     entryPrice: b.price,
                     contracts: 10,
@@ -535,21 +537,93 @@ export class CombinatorialArb {
                     polySide: b.side,
                 });
             }
-            this.trader.state.trades.push(trade);
-            this.stats.trades++;
-            
-            console.log(`[COMBO-ARB] 📊 Paper trade: ${name}`);
-            console.log(`  ${opp.action}`);
+        } else if (opp.markets && opp.markets.length > 0) {
+            // Completeness opportunities — buy YES on all (gap) or NO on most expensive (excess)
+            if (opp.type === 'completeness_gap') {
+                // Buy YES on all outcomes — total cost < 100¢, guaranteed 100¢ payout
+                for (const m of opp.markets) {
+                    this.trader.state.positions.push({
+                        name: `${name} | ${m.question?.substring(0, 40)}`,
+                        strategy: 'combinatorial',
+                        oppKey,
+                        side: 'YES',
+                        entryPrice: m.yesPrice,
+                        contracts: 10,
+                        enteredAt: new Date().toISOString(),
+                        polySide: 'YES',
+                    });
+                }
+            } else if (opp.type === 'completeness_excess') {
+                // Buy NO on the most overpriced outcomes
+                // Sort by yesPrice desc — the most expensive YES is most likely overpriced
+                const sorted = [...opp.markets].sort((a, b) => b.yesPrice - a.yesPrice);
+                const topOverpriced = sorted.slice(0, Math.ceil(sorted.length / 2));
+                for (const m of topOverpriced) {
+                    this.trader.state.positions.push({
+                        name: `${name} | NO: ${m.question?.substring(0, 35)}`,
+                        strategy: 'combinatorial',
+                        oppKey,
+                        side: 'NO',
+                        entryPrice: 100 - m.yesPrice,
+                        contracts: 10,
+                        enteredAt: new Date().toISOString(),
+                        polySide: 'NO',
+                    });
+                }
+            }
+        } else {
+            // No actionable buy info — just log it
+            console.log(`[COMBO-ARB] ⚠️ Opportunity found but no trade targets: ${opp.type}`);
+            return;
         }
+        
+        this.trader.state.trades.push(trade);
+        this.stats.trades++;
+        
+        console.log(`[COMBO-ARB] 📊 Paper trade: ${name}`);
+        console.log(`  ${opp.action}`);
     }
 
     /**
      * Heuristic: do these questions look like mutually exclusive outcomes?
      * "Will Trump win?" / "Will Biden win?" → yes (same structure, different entity)
      * "Rebounds O/U 3.5" / "Assists O/U 8.5" → no (different metrics)
+     * "BTC above $82k" / "BTC above $84k" → no (cumulative thresholds, not exclusive)
      */
     _looksExclusive(questions) {
         if (questions.length < 3) return false;
+        
+        // Check for CUMULATIVE THRESHOLD patterns — these are NOT mutually exclusive
+        // "above X", "below X", "more than X", "at least X", "reach X", "hit X"
+        // If all questions follow the same threshold pattern with different numbers, skip
+        const thresholdPatterns = [
+            /\babove\s+\$?[\d,.]+/i,
+            /\bbelow\s+\$?[\d,.]+/i,
+            /\bmore than\s+\$?[\d,.]+/i,
+            /\bless than\s+\$?[\d,.]+/i,
+            /\bat least\s+\$?[\d,.]+/i,
+            /\breach\s+\$?[\d,.]+/i,
+            /\bhit\s+\$?[\d,.]+/i,
+            /\bexceed\s+\$?[\d,.]+/i,
+            /\bover\s+\$?[\d,.]+k?\b/i,
+            /\bunder\s+\$?[\d,.]+k?\b/i,
+        ];
+        
+        const matchesThreshold = questions.filter(q => 
+            thresholdPatterns.some(p => p.test(q))
+        );
+        if (matchesThreshold.length >= questions.length * 0.7) {
+            // Most questions are threshold-style → cumulative, NOT exclusive
+            return false;
+        }
+        
+        // Also check for range-bucket patterns like "250,000-500,000", "500,000-750,000"
+        // These ARE mutually exclusive (different ranges)
+        const rangePattern = /[\d,.]+\s*[-–]\s*[\d,.]+/;
+        const rangeCount = questions.filter(q => rangePattern.test(q)).length;
+        if (rangeCount >= questions.length * 0.5) {
+            return true; // Range buckets are exclusive
+        }
         
         // Check if questions share a common template with one varying part
         // e.g., "Will X win the 2024 election?" where X varies
