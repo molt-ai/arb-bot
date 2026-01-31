@@ -292,7 +292,7 @@
             document.getElementById('total-trades').textContent = p.totalTrades;
             document.getElementById('win-rate').textContent = p.winRate + '%';
             document.getElementById('open-positions').textContent = p.openPositions;
-            document.getElementById('expected-profit').textContent = '+$' + p.expectedProfit;
+            document.getElementById('expected-profit').textContent = '+$' + (isNaN(parseFloat(p.expectedProfit)) ? '0.00' : p.expectedProfit);
             document.getElementById('poly-balance').textContent = '$' + p.polyBalance;
             document.getElementById('kalshi-balance').textContent = '$' + p.kalshiBalance;
 
@@ -319,8 +319,8 @@
                     return `<div class="pos-row" style="grid-template-columns: 2fr 80px 70px 70px 100px;">
                         <span class="opp-name">${pos.name}</span>
                         <span>P:${pos.polySide} K:${pos.kalshiSide}</span>
-                        <span>$${(pos.totalCost/100).toFixed(2)}</span>
-                        <span class="pnl positive">+$${(pos.expectedNetProfit/100).toFixed(2)}</span>
+                        <span>$${((pos.totalCost||0)/100).toFixed(2)}</span>
+                        <span class="pnl positive">+$${((pos.expectedNetProfit||0)/100).toFixed(2)}</span>
                         <span style="color:#60a5fa;font-size:0.75rem;">${payoutStr}</span>
                     </div>`;
                 }).join('');
@@ -336,7 +336,7 @@
                     const isResolve = t.type === 'RESOLVE';
                     const typeClass = isEntry ? 'entry' : isResolve ? 'resolve' : 'exit';
                     const typeLabel = isEntry ? 'BUY' : isResolve ? 'RESOLVE' : 'EXIT';
-                    const cost = isEntry ? '$' + (t.totalCost/100).toFixed(2) : (t.payout ? '$' + (t.payout/100).toFixed(2) : '—');
+                    const cost = isEntry ? '$' + ((t.totalCost||0)/100).toFixed(2) : (t.payout ? '$' + (t.payout/100).toFixed(2) : '—');
                     const fees = t.fees ? '$' + (t.fees/100).toFixed(2) : '—';
                     const netPnl = t.netPnl ?? t.netPnl ?? null;
                     const pnlStr = netPnl !== null ? ((netPnl >= 0 ? '+$' : '-$') + Math.abs(netPnl/100).toFixed(2)) : '—';

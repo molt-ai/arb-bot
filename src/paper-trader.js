@@ -360,10 +360,10 @@ export class PaperTrader {
 
     getPortfolioSummary() {
         const totalCash = this.state.polyBalance + this.state.kalshiBalance;
-        const positionCost = this.state.positions.reduce((s, p) => s + p.totalCost, 0);
+        const positionCost = this.state.positions.reduce((s, p) => s + (p.totalCost || 0), 0);
         // Expected payout if all positions resolve (100¢ per contract)
-        const expectedPayout = this.state.positions.reduce((s, p) => s + (100 * p.contracts), 0);
-        const expectedProfit = this.state.positions.reduce((s, p) => s + p.expectedNetProfit, 0);
+        const expectedPayout = this.state.positions.reduce((s, p) => s + (100 * (p.contracts || 0)), 0);
+        const expectedProfit = this.state.positions.reduce((s, p) => s + (p.expectedNetProfit || 0), 0);
         const totalValue = totalCash + expectedPayout;
         const initialTotal = this.initialBalance * 200;
 

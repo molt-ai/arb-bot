@@ -492,95 +492,124 @@ export class CombinatorialArb {
 
     /**
      * Execute a paper trade for a combinatorial arb opportunity.
+     * Creates properly-formed positions compatible with PaperTrader's format.
      */
     _executePaperTrade(opp) {
         if (!this.trader) return;
         
         const name = `COMBO: ${opp.type} (${opp.edge}¢)`;
         
-        // Check if we already have this position (by type + event to avoid exact edge matching)
+        // Check if we already have this position (by type + event to avoid dupes)
         const oppKey = `${opp.type}:${opp.event || opp.reason?.substring(0, 30)}`;
-        const existing = this.trader.state.positions.find(p => 
-            p.oppKey === oppKey
-        );
+        const existing = this.trader.state.positions.find(p => p.oppKey === oppKey);
         if (existing) return;
         
-        // For the arb bot, we record the trade in the paper trader
-        const trade = {
-            name,
-            strategy: 'combinatorial',
-            type: opp.type,
-            edge: opp.edge,
-            relationship: opp.relationship,
-            source: opp.source,
-            action: opp.action,
-            reason: opp.reason,
-            confidence: opp.confidence,
-            matchScore: opp.matchScore,
-            timestamp: new Date().toISOString(),
-        };
+        // Check position limit
+        if (this.trader.state.positions.length >= (this.trader.maxOpenPositions || 20)) return;
         
-        // Add to paper trader as a position
+        const contracts = 10; // Standard contract size
+        const polyFeePct = 0.02; // ~2% Polymarket fee estimate
+        const now = new Date();
+        
+        // Build the list of buys with proper cost calculations
+        const buys = [];
+        
         if (opp.buy) {
-            // Standard pairwise opportunities with explicit buy targets
-            const buys = Array.isArray(opp.buy) ? opp.buy : [opp.buy];
-            for (const b of buys) {
-                this.trader.state.positions.push({
-                    name: `${name} | ${b.market.question?.substring(0, 40)}`,
-                    strategy: 'combinatorial',
-                    oppKey,
+            const buyList = Array.isArray(opp.buy) ? opp.buy : [opp.buy];
+            for (const b of buyList) {
+                buys.push({
+                    label: b.market.question?.substring(0, 40),
                     side: b.side,
-                    entryPrice: b.price,
-                    contracts: 10,
-                    enteredAt: new Date().toISOString(),
+                    price: b.price,
                     expiresAt: b.market.endDate,
-                    polySide: b.side,
                 });
             }
         } else if (opp.markets && opp.markets.length > 0) {
-            // Completeness opportunities — buy YES on all (gap) or NO on most expensive (excess)
             if (opp.type === 'completeness_gap') {
-                // Buy YES on all outcomes — total cost < 100¢, guaranteed 100¢ payout
                 for (const m of opp.markets) {
-                    this.trader.state.positions.push({
-                        name: `${name} | ${m.question?.substring(0, 40)}`,
-                        strategy: 'combinatorial',
-                        oppKey,
+                    buys.push({
+                        label: m.question?.substring(0, 40),
                         side: 'YES',
-                        entryPrice: m.yesPrice,
-                        contracts: 10,
-                        enteredAt: new Date().toISOString(),
-                        polySide: 'YES',
+                        price: m.yesPrice,
+                        expiresAt: m.endDate,
                     });
                 }
             } else if (opp.type === 'completeness_excess') {
-                // Buy NO on the most overpriced outcomes
-                // Sort by yesPrice desc — the most expensive YES is most likely overpriced
                 const sorted = [...opp.markets].sort((a, b) => b.yesPrice - a.yesPrice);
                 const topOverpriced = sorted.slice(0, Math.ceil(sorted.length / 2));
                 for (const m of topOverpriced) {
-                    this.trader.state.positions.push({
-                        name: `${name} | NO: ${m.question?.substring(0, 35)}`,
-                        strategy: 'combinatorial',
-                        oppKey,
+                    buys.push({
+                        label: `NO: ${m.question?.substring(0, 35)}`,
                         side: 'NO',
-                        entryPrice: 100 - m.yesPrice,
-                        contracts: 10,
-                        enteredAt: new Date().toISOString(),
-                        polySide: 'NO',
+                        price: 100 - m.yesPrice,
+                        expiresAt: m.endDate,
                     });
                 }
             }
-        } else {
-            // No actionable buy info — just log it
+        }
+        
+        if (buys.length === 0) {
             console.log(`[COMBO-ARB] ⚠️ Opportunity found but no trade targets: ${opp.type}`);
             return;
         }
         
-        this.trader.state.trades.push(trade);
+        // Create properly-formed positions for each buy
+        for (const b of buys) {
+            const costCents = b.price * contracts;
+            const feeCents = Math.round((100 - b.price) * polyFeePct * contracts);
+            const expectedPayout = 100 * contracts; // $1 per contract at resolution
+            const grossSpread = 100 - b.price;
+            const expectedNetProfit = (grossSpread * contracts) - feeCents;
+            
+            // Check balance (single-platform, use poly balance)
+            if (costCents > this.trader.state.polyBalance) continue;
+            
+            // Deduct from balance
+            this.trader.state.polyBalance -= costCents;
+            
+            this.trader.state.positions.push({
+                id: `combo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                name: `${name} | ${b.label}`,
+                strategy: 'combinatorial',
+                oppKey,
+                polySide: b.side,
+                kalshiSide: null, // Single-platform position
+                polyPrice: b.price,
+                kalshiPrice: 0,
+                contracts,
+                totalCost: costCents,
+                grossSpread,
+                fees: feeCents,
+                expectedNetProfit,
+                expiresAt: b.expiresAt || null,
+                entryTime: now.toISOString(),
+                entryTimestamp: Date.now(),
+                // Combo-specific metadata
+                oppType: opp.type,
+                confidence: opp.confidence,
+            });
+        }
+        
+        // Record trade and update counters
+        this.trader.state.totalTrades++;
+        this.trader.state.trades = this.trader.state.trades || [];
+        this.trader.state.trades.push({
+            name,
+            type: 'ENTRY',
+            strategy: 'combinatorial',
+            oppType: opp.type,
+            edge: opp.edge,
+            action: opp.action,
+            reason: opp.reason,
+            confidence: opp.confidence,
+            positions: buys.length,
+            timestamp: now.toISOString(),
+        });
+        
+        this.trader.save();
         this.stats.trades++;
         
-        console.log(`[COMBO-ARB] 📊 Paper trade: ${name}`);
+        console.log(`[COMBO-ARB] 📊 Paper trade: ${name} (${buys.length} positions)`);
         console.log(`  ${opp.action}`);
     }
 
