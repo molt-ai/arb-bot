@@ -319,11 +319,16 @@ function extractStructure(text) {
         'real estate': { name: 'housing_market', type: 'concept', domain: 'economics' },
         'recession': { name: 'recession', type: 'event', domain: 'economics' },
         'inflation': { name: 'inflation', type: 'concept', domain: 'economics' },
-        'unemployment': { name: 'unemployment', type: 'concept', domain: 'economics' },
+        'unemployment': { name: 'employment', type: 'concept', domain: 'economics' },
+        'jobs': { name: 'employment', type: 'concept', domain: 'economics' },
+        'employment': { name: 'employment', type: 'concept', domain: 'economics' },
+        'hiring': { name: 'employment', type: 'concept', domain: 'economics' },
+        'layoff': { name: 'employment', type: 'concept', domain: 'economics' },
+        'layoffs': { name: 'employment', type: 'concept', domain: 'economics' },
         'ceasefire': { name: 'ceasefire', type: 'event', domain: 'geopolitics' },
-        'war': { name: 'war', type: 'event', domain: 'geopolitics' },
-        'peace': { name: 'ceasefire', type: 'event', domain: 'geopolitics' },
-        'truce': { name: 'ceasefire', type: 'event', domain: 'geopolitics' },
+        'war': { name: 'conflict', type: 'event', domain: 'geopolitics' },
+        'peace': { name: 'conflict', type: 'event', domain: 'geopolitics' },
+        'truce': { name: 'conflict', type: 'event', domain: 'geopolitics' },
         'interest rate': { name: 'interest_rate', type: 'concept', domain: 'economics' },
         'rates': { name: 'interest_rate', type: 'concept', domain: 'economics' },
         'oil': { name: 'oil', type: 'commodity', domain: 'commodities' },
@@ -402,8 +407,8 @@ function extractStructure(text) {
         { pattern: /\b(approve|approves|pass\b|passes|passing|enact|enacts)\b/, action: 'pass' },
         { pattern: /\b(fail|fails|failing|failed|failure|reject|rejects|rejected)\b/, action: 'fail' },
         { pattern: /\b(hold|holds|steady|unchanged|maintain|maintains|pause|pauses)\b/, action: 'hold' },
-        { pattern: /\b(invade|invades|invasion|attack|attacks)\b/, action: 'invade' },
-        { pattern: /\b(ceasefire|peace|truce|armistice)\b/, action: 'ceasefire' },
+        { pattern: /\b(invade|invades|invasion|attack|attacks|war|wars|conflict|fight|fighting)\b/, action: 'invade' },
+        { pattern: /\b(ceasefire|peace|peaceful|truce|armistice|maintain|maintained)\b/, action: 'ceasefire' },
         { pattern: /\b(recession|contract|contracts|contraction)\b/, action: 'recession' },
     ];
     for (const { pattern, action } of actionPatterns) {
@@ -674,8 +679,8 @@ async function getEmbeddingPipeline() {
     _pipelineLoading = (async () => {
         try {
             const { pipeline } = await import('@huggingface/transformers');
-            console.log('[ENTITY-MATCHER] Loading embedding model (first time downloads ~23MB)...');
-            _pipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+            console.log('[ENTITY-MATCHER] Loading embedding model (first time downloads ~130MB)...');
+            _pipeline = await pipeline('feature-extraction', 'Xenova/bge-base-en-v1.5', {
                 dtype: 'fp32',
             });
             console.log('[ENTITY-MATCHER] Embedding model loaded ✓');

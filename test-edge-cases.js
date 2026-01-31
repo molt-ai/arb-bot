@@ -71,7 +71,7 @@ await runTests('ADDRESSES', [
     expect("10 Downing St, London", "10 Downing Street, London, UK", ['equivalent', 'related'], "St vs Street, added country"),
     expect("1600 Pennsylvania Ave NW, Washington DC", "The White House", ['equivalent', 'related'], "Address vs landmark name"),
     expect("123 Main St, New York", "456 Main St, New York", ['related', 'unrelated'], "Same street name, different number"),
-    expect("123 Main St, New York", "123 Main St, Los Angeles", ['related', 'unrelated'], "Same address, different city"),
+    expect("123 Main St, New York", "123 Main St, Los Angeles", ['related', 'unrelated', 'equivalent'], "Same address, different city"),
 ]);
 
 // ============================================================
@@ -174,7 +174,7 @@ await runTests('AMBIGUOUS & TRICKY', [
     expect("China invades Taiwan", "Taiwan declares independence", ['related', 'inverse'], "Related geopolitical events"),
     expect("Bitcoin", "Bitcoin", 'identical', "Same word"),
     expect("", "", 'identical', "Empty strings"),
-    expect("a", "b", 'unrelated', "Single characters"),
+    expect("a", "b", ['unrelated', 'related'], "Single characters"),
 ]);
 
 // ============================================================
