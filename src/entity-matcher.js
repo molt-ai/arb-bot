@@ -686,7 +686,10 @@ async function getEmbeddingPipeline() {
             console.log('[ENTITY-MATCHER] Embedding model loaded ✓');
             return _pipeline;
         } catch (e) {
-            console.warn('[ENTITY-MATCHER] Embedding model unavailable:', e.message);
+            if (!getEmbeddingPipeline._warned) {
+                console.warn('[ENTITY-MATCHER] Embedding model unavailable:', e.message);
+                getEmbeddingPipeline._warned = true;
+            }
             _pipelineLoading = null;
             return null;
         }
