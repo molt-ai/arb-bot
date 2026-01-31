@@ -214,11 +214,33 @@ export class CombinatorialArb {
     /**
      * Check if mutually exclusive outcomes in a group sum to ~100%.
      * E.g., in "Who wins the election?", all candidate YES prices should sum to ~100.
+     * 
+     * IMPORTANT: Not all markets in an event are mutually exclusive!
+     * Sports player stats (rebounds, assists) are independent.
+     * "Trump talks to X" questions are independent (can talk to multiple).
+     * Only true mutually exclusive: elections, single-winner events.
      */
     _checkCompleteness(eventTitle, markets) {
         const opps = [];
         
-        // If all markets share a common pattern (e.g., "X wins Y"), they might be mutually exclusive
+        // Skip events that are clearly NOT mutually exclusive
+        const title = eventTitle.toLowerCase();
+        const isIndependent = 
+            title.includes('vs.') || title.includes('vs ') ||  // Sports games (player stats)
+            title.includes('o/u') || title.includes('over/under') ||
+            title.includes('talk to') || title.includes('speak to') ||
+            title.includes('by...') || title.includes('by ') || // "X by date" (cumulative, not exclusive)
+            markets.some(m => m.question.toLowerCase().includes('o/u')) ||
+            markets.some(m => m.question.toLowerCase().includes('over/under'));
+        
+        if (isIndependent) return opps;
+        
+        // Check if markets look mutually exclusive (similar question structure)
+        // "Will X win?" / "Will Y win?" pattern
+        const questions = markets.map(m => m.question.toLowerCase());
+        const hasCommonPattern = this._looksExclusive(questions);
+        if (!hasCommonPattern) return opps;
+        
         const totalYes = markets.reduce((sum, m) => sum + m.yesPrice, 0);
         
         // Only flag if there are 3+ outcomes (binary is handled by same-market arb)
@@ -519,6 +541,31 @@ export class CombinatorialArb {
             console.log(`[COMBO-ARB] 📊 Paper trade: ${name}`);
             console.log(`  ${opp.action}`);
         }
+    }
+
+    /**
+     * Heuristic: do these questions look like mutually exclusive outcomes?
+     * "Will Trump win?" / "Will Biden win?" → yes (same structure, different entity)
+     * "Rebounds O/U 3.5" / "Assists O/U 8.5" → no (different metrics)
+     */
+    _looksExclusive(questions) {
+        if (questions.length < 3) return false;
+        
+        // Check if questions share a common template with one varying part
+        // e.g., "Will X win the 2024 election?" where X varies
+        const words = questions.map(q => q.split(/\s+/));
+        if (words.length < 3) return false;
+        
+        // Find shared prefix/suffix length
+        const first = words[0];
+        let sharedWords = 0;
+        for (const w of first) {
+            if (questions.every(q => q.includes(w))) sharedWords++;
+        }
+        
+        // If most words are shared across all questions, they're likely exclusive variants
+        const avgLen = words.reduce((s, w) => s + w.length, 0) / words.length;
+        return sharedWords >= avgLen * 0.4; // At least 40% shared words
     }
 
     /**
