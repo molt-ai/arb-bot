@@ -461,7 +461,93 @@ function checkImplicitEntityRelationship(structA, structB) {
 }
 
 // ============================================================
-// LAYER 4: Edit Distance (lightweight, no model needed)
+// LAYER 4: Semantic Embeddings (local model, no API)
+// ============================================================
+
+let _pipeline = null;
+let _pipelineLoading = null;
+
+/**
+ * Lazy-load the embedding model. First call downloads ~23MB model,
+ * subsequent calls are instant. Runs entirely local via ONNX.
+ * Model: all-MiniLM-L6-v2 (384-dim embeddings, great for similarity)
+ */
+async function getEmbeddingPipeline() {
+    if (_pipeline) return _pipeline;
+    if (_pipelineLoading) return _pipelineLoading;
+    
+    _pipelineLoading = (async () => {
+        try {
+            const { pipeline } = await import('@huggingface/transformers');
+            console.log('[ENTITY-MATCHER] Loading embedding model (first time downloads ~23MB)...');
+            _pipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+                dtype: 'fp32',
+            });
+            console.log('[ENTITY-MATCHER] Embedding model loaded ✓');
+            return _pipeline;
+        } catch (e) {
+            console.warn('[ENTITY-MATCHER] Embedding model unavailable:', e.message);
+            _pipelineLoading = null;
+            return null;
+        }
+    })();
+    
+    return _pipelineLoading;
+}
+
+/**
+ * Get embedding vector for a text string.
+ * Returns Float32Array of 384 dimensions, or null if model unavailable.
+ */
+async function embed(text) {
+    const pipe = await getEmbeddingPipeline();
+    if (!pipe) return null;
+    
+    const output = await pipe(text, { pooling: 'mean', normalize: true });
+    return output.data;
+}
+
+/**
+ * Cosine similarity between two embedding vectors.
+ */
+function cosineSimilarity(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+    }
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
+ * Compute semantic similarity between two texts using local embeddings.
+ * Returns 0-1 score, or null if model unavailable.
+ */
+async function semanticSimilarity(textA, textB) {
+    const [embA, embB] = await Promise.all([embed(textA), embed(textB)]);
+    if (!embA || !embB) return null;
+    return cosineSimilarity(embA, embB);
+}
+
+// Embedding cache for batch operations
+const _embeddingCache = new Map();
+
+async function embedCached(text) {
+    const key = normalize(text);
+    if (_embeddingCache.has(key)) return _embeddingCache.get(key);
+    const emb = await embed(text);
+    if (emb) _embeddingCache.set(key, emb);
+    return emb;
+}
+
+function clearEmbeddingCache() {
+    _embeddingCache.clear();
+}
+
+// ============================================================
+// LAYER 5: Edit Distance (lightweight fallback)
 // ============================================================
 
 function levenshtein(a, b) {
@@ -502,26 +588,53 @@ class EntityMatcher {
         this.options = {
             // Minimum score to consider a match
             matchThreshold: options.matchThreshold || 0.6,
+            // Use semantic embeddings (local model, ~23MB download first time)
+            useEmbeddings: options.useEmbeddings !== false,
             // Weight for each signal
             weights: {
-                tokenOverlap: 0.25,
-                editDistance: 0.15,
-                structural: 0.45,
-                domainMatch: 0.15,
+                tokenOverlap: 0.15,
+                editDistance: 0.10,
+                structural: 0.35,
+                semantic: 0.30,     // embedding cosine similarity
+                domainMatch: 0.10,
                 ...(options.weights || {}),
             },
         };
+        this._modelReady = false;
     }
 
     /**
-     * Match two strings/records and determine their relationship.
-     * 
-     * @param {string} a - First entity/question
-     * @param {string} b - Second entity/question
-     * @param {object} context - Optional context (domain hint, etc.)
-     * @returns {{ score: number, relationship: string, confidence: number, signals: object }}
+     * Pre-load the embedding model. Optional — model loads lazily on first use.
+     * Call this at startup to avoid latency on first match.
      */
-    match(a, b, context = {}) {
+    async warmup() {
+        if (!this.options.useEmbeddings) return;
+        const pipe = await getEmbeddingPipeline();
+        this._modelReady = !!pipe;
+        return this._modelReady;
+    }
+
+    /**
+     * Synchronous match — uses all layers EXCEPT semantic embeddings.
+     * Fast, no async, good for high-throughput scanning.
+     */
+    matchSync(a, b, context = {}) {
+        return this._matchInternal(a, b, null, context);
+    }
+
+    /**
+     * Full async match — includes semantic embedding similarity.
+     * More accurate for unstructured/free-form text.
+     */
+    async match(a, b, context = {}) {
+        let semanticScore = null;
+        if (this.options.useEmbeddings) {
+            semanticScore = await semanticSimilarity(a, b);
+        }
+        return this._matchInternal(a, b, semanticScore, context);
+    }
+
+    _matchInternal(a, b, semanticScore, context = {}) {
         const normA = normalize(a);
         const normB = normalize(b);
 
@@ -543,7 +656,7 @@ class EntityMatcher {
         const structB = extractStructure(b);
         const structural = detectRelationship(structA, structB);
 
-        // Layer 4: Edit distance
+        // Layer 5: Edit distance
         const editSim = normalizedEditDistance(a, b);
 
         // Domain match bonus
@@ -551,26 +664,78 @@ class EntityMatcher {
 
         // Aggregate score
         const w = this.options.weights;
-        const score = Math.min(1, (
-            tokenSim.jaccard * w.tokenOverlap +
-            editSim * w.editDistance +
-            structural.confidence * w.structural +
-            domainMatch * w.domainMatch
-        ));
+        let score;
+        
+        if (semanticScore != null) {
+            // Full scoring with semantic layer
+            score = Math.min(1, (
+                tokenSim.jaccard * w.tokenOverlap +
+                editSim * w.editDistance +
+                structural.confidence * w.structural +
+                semanticScore * w.semantic +
+                domainMatch * w.domainMatch
+            ));
+        } else {
+            // No embeddings — redistribute semantic weight proportionally
+            const noSemTotal = w.tokenOverlap + w.editDistance + w.structural + w.domainMatch;
+            score = Math.min(1, (
+                tokenSim.jaccard * (w.tokenOverlap / noSemTotal) +
+                editSim * (w.editDistance / noSemTotal) +
+                structural.confidence * (w.structural / noSemTotal) +
+                domainMatch * (w.domainMatch / noSemTotal)
+            ));
+        }
+
+        // Semantic upgrade: if structural says "unrelated" but semantic is very high (>0.8),
+        // upgrade to "related" — the model sees something the rules missed
+        let relationship = structural.relationship;
+        let confidence = structural.confidence;
+        const reasoning = [...(structural.reasoning || [])];
+
+        if (semanticScore != null && semanticScore > 0.8 && relationship === 'unrelated') {
+            relationship = 'related';
+            confidence = Math.max(confidence, semanticScore * 0.8);
+            reasoning.push(`Semantic similarity high (${(semanticScore * 100).toFixed(0)}%) despite no structural match`);
+        }
+
+        // Semantic boost: if structural found a relationship, high semantic confirms it
+        if (semanticScore != null && semanticScore > 0.7 && relationship !== 'unrelated') {
+            confidence = Math.min(1, confidence + 0.1);
+            reasoning.push(`Semantic similarity confirms: ${(semanticScore * 100).toFixed(0)}%`);
+        }
+
+        // Semantic downgrade: if structural says related but semantic is very low (<0.3),
+        // reduce confidence — the meaning is actually different
+        if (semanticScore != null && semanticScore < 0.3 && confidence > 0.5) {
+            confidence *= 0.7;
+            reasoning.push(`Semantic similarity low (${(semanticScore * 100).toFixed(0)}%) — reducing confidence`);
+        }
+
+        // Recalculate score with potentially updated confidence
+        if (semanticScore != null) {
+            score = Math.min(1, (
+                tokenSim.jaccard * w.tokenOverlap +
+                editSim * w.editDistance +
+                confidence * w.structural +
+                semanticScore * w.semantic +
+                domainMatch * w.domainMatch
+            ));
+        }
 
         return {
             score: Math.round(score * 1000) / 1000,
-            relationship: structural.relationship,
-            confidence: structural.confidence,
+            relationship,
+            confidence: Math.round(confidence * 100) / 100,
             signals: {
                 tokenJaccard: Math.round(tokenSim.jaccard * 100) / 100,
                 tokenOverlap: Math.round(tokenSim.overlap * 100) / 100,
                 editDistance: Math.round(editSim * 100) / 100,
+                semantic: semanticScore != null ? Math.round(semanticScore * 100) / 100 : null,
                 sharedTokens: tokenSim.sharedTokens,
                 domain: structA.domain,
                 structureA: structA,
                 structureB: structB,
-                reasoning: structural.reasoning,
+                reasoning,
             },
         };
     }
@@ -578,13 +743,14 @@ class EntityMatcher {
     /**
      * Find matches for an entity against a list of candidates.
      * Returns candidates sorted by score (descending).
+     * Async version uses embeddings; pass { sync: true } for fast mode.
      */
-    findMatches(query, candidates, context = {}) {
-        const results = candidates.map((candidate, i) => {
+    async findMatches(query, candidates, context = {}) {
+        const results = await Promise.all(candidates.map(async (candidate, i) => {
             const text = typeof candidate === 'string' ? candidate : candidate.question || candidate.name || candidate.text;
-            const result = this.match(query, text, context);
+            const result = context.sync ? this.matchSync(query, text, context) : await this.match(query, text, context);
             return { ...result, index: i, candidate };
-        });
+        }));
 
         return results
             .filter(r => r.score >= this.options.matchThreshold)
@@ -594,15 +760,33 @@ class EntityMatcher {
     /**
      * Find all pairwise relationships in a list of entities.
      * Returns pairs with detected logical relationships for arbitrage.
+     * Uses embeddings by default; pass { sync: true } for fast mode.
      */
-    findRelationships(entities, context = {}) {
+    async findRelationships(entities, context = {}) {
         const pairs = [];
+        
+        // Pre-compute all embeddings in batch for efficiency
+        if (this.options.useEmbeddings && !context.sync) {
+            await Promise.all(entities.map(e => {
+                const text = typeof e === 'string' ? e : e.question || e.name;
+                return embedCached(text);
+            }));
+        }
+        
         for (let i = 0; i < entities.length; i++) {
             for (let j = i + 1; j < entities.length; j++) {
                 const textA = typeof entities[i] === 'string' ? entities[i] : entities[i].question || entities[i].name;
                 const textB = typeof entities[j] === 'string' ? entities[j] : entities[j].question || entities[j].name;
                 
-                const result = this.match(textA, textB, context);
+                let result;
+                if (context.sync) {
+                    result = this.matchSync(textA, textB, context);
+                } else {
+                    // Use cached embeddings for efficiency
+                    const [embA, embB] = await Promise.all([embedCached(textA), embedCached(textB)]);
+                    const semScore = (embA && embB) ? cosineSimilarity(embA, embB) : null;
+                    result = this._matchInternal(textA, textB, semScore, context);
+                }
                 
                 // Only return non-unrelated pairs
                 if (result.relationship !== 'unrelated' && result.score >= this.options.matchThreshold) {
@@ -628,11 +812,11 @@ class EntityMatcher {
  * Given a list of markets with prices, find combinatorial arbitrage opportunities
  * based on logical relationships between markets.
  */
-function findCombinatorialArbs(markets, options = {}) {
+async function findCombinatorialArbs(markets, options = {}) {
     const matcher = new EntityMatcher(options);
     const opportunities = [];
 
-    const pairs = matcher.findRelationships(markets);
+    const pairs = await matcher.findRelationships(markets);
 
     for (const pair of pairs) {
         const marketA = pair.entityA;
@@ -759,6 +943,11 @@ export {
     extractStructure,
     detectRelationship,
     normalizedEditDistance,
+    semanticSimilarity,
+    embed,
+    cosineSimilarity,
+    clearEmbeddingCache,
+    getEmbeddingPipeline,
 };
 
 export default EntityMatcher;

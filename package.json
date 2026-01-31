@@ -19,6 +19,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@nevuamarkets/poly-websockets": "^1.0.0",
     "cors": "^2.8.6",
     "dotenv": "^16.0.0",
