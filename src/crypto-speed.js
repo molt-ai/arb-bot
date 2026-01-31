@@ -201,11 +201,23 @@ export class CryptoSpeedStrategy extends EventEmitter {
             // Is it cheap enough? (market hasn't caught up to reality yet)
             if (buyPrice > this.config.maxBuyPrice) continue;
 
+            // Skip dust markets — prices below 1¢ have no real liquidity
+            if (buyPrice < 1) continue;
+
             // Estimate true probability from momentum
             const estimatedProb = this._estimateProbability(momentum);
             const edge = estimatedProb - buyPrice;
 
             if (edge < this.config.minEdge) continue;
+
+            // Prevent duplicate positions for same ticker+direction
+            const posName = `⚡${market.ticker} ${buyYes ? 'UP' : 'DOWN'} (15m speed)`;
+            const existingPos = this.trader.state.positions.find(p => p.name === posName);
+            if (existingPos) continue;
+
+            // Cap total crypto speed positions
+            const csPositions = this.trader.state.positions.filter(p => p.name?.startsWith('⚡')).length;
+            if (csPositions >= 5) continue;
 
             // 🚨 SIGNAL: Strong momentum + cheap price = buy
             this.stats.signals++;
