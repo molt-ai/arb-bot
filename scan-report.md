@@ -1,5 +1,5 @@
 # Arbitrage Scan Report
-Generated: 2026-01-30T17:00:21.270Z
+Generated: 2026-01-31T01:00:17.086Z
 
 ## Summary
 | Market | Poly Outcomes | Kalshi Outcomes | Matches | Opportunities | Best Profit |
