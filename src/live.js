@@ -23,6 +23,7 @@ import { insertNearMiss } from './db.js';
 import { AutoRedeemer } from './auto-redeem.js';
 import { OrderManager } from './order-manager.js';
 import { CircuitBreaker } from './circuit-breaker.js';
+import { LiveExecutor } from './live-executor.js';
 
 const POLY_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const KALSHI_WS_URL = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
@@ -154,6 +155,14 @@ class LiveBot {
             timeoutMs: 10000, // 10 second timeout per order
         });
 
+        // ── Live/Paper Mode ─────────────────────────────────
+        this.isLiveMode = process.env.DRY_RUN === '0';
+        this.liveExecutor = new LiveExecutor(this.polymarket, this.kalshi, {
+            dryRun: !this.isLiveMode,
+            proxyUrl: process.env.ORDER_PROXY_URL,
+            proxyToken: process.env.ORDER_PROXY_TOKEN,
+        });
+
         // New strategies
         this.binanceFeed = new BinanceFeed();
         this.chainlinkFeed = new ChainlinkFeed();
@@ -168,10 +177,18 @@ class LiveBot {
     }
 
     async start() {
+        const modeTag = this.isLiveMode ? '🔴 LIVE MODE — REAL MONEY' : '📄 PAPER MODE — DRY RUN';
         console.log('╔═══════════════════════════════════════════════════╗');
-        console.log('║   🎯 ARB BOT v3 — MULTI-STRATEGY LIVE MODE      ║');
+        console.log('║   🎯 ARB BOT v3 — MULTI-STRATEGY                ║');
+        console.log(`║   ${modeTag.padEnd(47)}║`);
         console.log('║   XP + Crypto Speed + Rebalance + Combinatorial  ║');
         console.log('╚═══════════════════════════════════════════════════╝\n');
+
+        if (this.isLiveMode) {
+            console.log('⚠️  ⚠️  ⚠️  LIVE TRADING ENABLED — REAL ORDERS WILL BE PLACED ⚠️  ⚠️  ⚠️\n');
+        } else {
+            console.log('[PAPER MODE] Set DRY_RUN=0 to enable live trading\n');
+        }
 
         // 1. Start dashboard FIRST and WAIT for it to bind — Fly health checks need the port open
         this.dashboard = createDashboard(this, this.trader, { port: 3456 });
@@ -741,8 +758,8 @@ class LiveBot {
             });
         }
 
-        // Paper trade — gate through circuit breaker + execution lock
-        this._executeSafeTrade(opp);
+        // Trade — gate through circuit breaker + execution lock
+        this._executeSafeTrade(opp, mapping);
 
         // Alert real opportunities (profitable after fees)
         if (bestArb.isProfitable && bestArb.netProfit >= this.config.alertThresholdCents) {
@@ -756,7 +773,7 @@ class LiveBot {
 
     // ── Safe Trade Execution (circuit breaker + lock + balance reservation) ──
 
-    async _executeSafeTrade(opp) {
+    async _executeSafeTrade(opp, mapping) {
         // 1. Check circuit breaker
         const context = this._getPositionContext();
         const cbCheck = this.circuitBreaker.check(opp, context);
@@ -779,25 +796,69 @@ class LiveBot {
         try {
             // 3. Execute trade wrapped with OrderManager timeout
             const tradeId = `xp-${(opp.name || '').replace(/[^a-zA-Z0-9]/g, '-').substring(0, 40)}-${Date.now()}`;
-            const { status, result: trade, elapsedMs } = await this.orderManager.executeWithTimeout(
-                () => this.trader.executeTrade(opp),
-                tradeId
-            );
 
-            if (status === 'timeout') {
-                console.log(`⏰ TRADE TIMEOUT: ${opp.name} after ${elapsedMs}ms`);
-            } else if (trade) {
-                // 4. Record success with circuit breaker
-                this.circuitBreaker.recordSuccess();
+            // ── LIVE vs PAPER execution path ─────────────────────
+            if (this.isLiveMode && mapping) {
+                // LIVE MODE: Use LiveExecutor for real orders + paper trader for tracking
+                const { status, result: liveResult, elapsedMs } = await this.orderManager.executeWithTimeout(
+                    () => this.liveExecutor.execute(opp, mapping, this.trader.contractSize),
+                    tradeId
+                );
 
-                const net = (trade.expectedNetProfit / 100).toFixed(2);
-                const fee = (trade.fees / 100).toFixed(2);
-                console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: $${(trade.totalCost/100).toFixed(2)} | Gross: ${trade.grossSpread.toFixed(1)}¢ | Fees: $${fee} | Net: +$${net} | Exec: ${elapsedMs}ms`);
-                this.alerts.tradeExecuted(trade).catch(() => {});
-            this.email.tradeExecuted(trade).catch(() => {});
-                if (this.dashboard) {
-                    this.dashboard.broadcast('trade', trade);
-                    this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
+                if (status === 'timeout') {
+                    console.log(`⏰ [LIVE] TRADE TIMEOUT: ${opp.name} after ${elapsedMs}ms`);
+                } else if (liveResult?.success) {
+                    // Also record in paper trader for portfolio tracking
+                    const paperTrade = this.trader.executeTrade(opp);
+                    this.circuitBreaker.recordSuccess();
+
+                    const net = paperTrade ? (paperTrade.expectedNetProfit / 100).toFixed(2) : '?';
+                    const fee = paperTrade ? (paperTrade.fees / 100).toFixed(2) : '?';
+                    console.log(`🔴📈 [LIVE] ENTER ${opp.name} | S${opp.strategy} | Cost: ${opp.totalCost?.toFixed(1)}¢ | Net: +$${net} | Fees: $${fee} | Exec: ${elapsedMs}ms`);
+                    this.alerts.tradeExecuted(paperTrade || opp).catch(() => {});
+                    this.email.tradeExecuted(paperTrade || opp).catch(() => {});
+                    if (this.dashboard) {
+                        this.dashboard.broadcast('trade', paperTrade || opp);
+                        this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
+                    }
+                } else if (liveResult?.criticalPartialFill) {
+                    // Partial fill — one leg succeeded, one failed
+                    this.circuitBreaker.recordError(new Error(`Partial fill: ${liveResult.error}`));
+                    this.alerts.bigOpportunity({
+                        name: `🚨 PARTIAL FILL: ${opp.name}`,
+                        netProfit: 0,
+                        description: liveResult.error,
+                    }).catch(() => {});
+                    this.email.bigOpportunity({
+                        name: `🚨 PARTIAL FILL: ${opp.name}`,
+                        netProfit: 0,
+                        description: liveResult.error,
+                    }).catch(() => {});
+                } else if (liveResult?.error) {
+                    console.log(`❌ [LIVE] Failed: ${opp.name} — ${liveResult.error}`);
+                }
+            } else {
+                // PAPER MODE: Current behavior — paper trading only
+                const { status, result: trade, elapsedMs } = await this.orderManager.executeWithTimeout(
+                    () => this.trader.executeTrade(opp),
+                    tradeId
+                );
+
+                if (status === 'timeout') {
+                    console.log(`⏰ TRADE TIMEOUT: ${opp.name} after ${elapsedMs}ms`);
+                } else if (trade) {
+                    // 4. Record success with circuit breaker
+                    this.circuitBreaker.recordSuccess();
+
+                    const net = (trade.expectedNetProfit / 100).toFixed(2);
+                    const fee = (trade.fees / 100).toFixed(2);
+                    console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: $${(trade.totalCost/100).toFixed(2)} | Gross: ${trade.grossSpread.toFixed(1)}¢ | Fees: $${fee} | Net: +$${net} | Exec: ${elapsedMs}ms`);
+                    this.alerts.tradeExecuted(trade).catch(() => {});
+                    this.email.tradeExecuted(trade).catch(() => {});
+                    if (this.dashboard) {
+                        this.dashboard.broadcast('trade', trade);
+                        this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
+                    }
                 }
             }
         } catch (err) {
@@ -869,7 +930,8 @@ class LiveBot {
         const csStats = this.cryptoSpeed.getStats();
         const smStats = this.sameMarketArb.getStats();
         const caStats = this.combinatorialArb?.stats || {};
-        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} Binance ${bWs} CL ${clWs} | XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓) CS:${csStats.activeMarkets}mkts/${csStats.signals}sig SM:${smStats.found}found CA:${caStats.opportunitiesFound || 0}opps | ${p.openPositions} pos | P&L: $${p.netPnL} | Trades: ${p.totalTrades}`);
+        const modeIndicator = this.isLiveMode ? '🔴LIVE' : '📄PAPER';
+        console.log(`[${new Date().toLocaleTimeString()}] ${modeIndicator} | Poly ${pWs} Kalshi ${kWs} Binance ${bWs} CL ${clWs} | XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓) CS:${csStats.activeMarkets}mkts/${csStats.signals}sig SM:${smStats.found}found CA:${caStats.opportunitiesFound || 0}opps | ${p.openPositions} pos | P&L: $${p.netPnL} | Trades: ${p.totalTrades}`);
     }
 
     stop() {

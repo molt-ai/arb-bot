@@ -136,9 +136,13 @@ export function createDashboard(bot, trader, config = {}) {
         const profitableXP = xpOpps.filter(o => o.isProfitable);
 
         // Build text summary
+        const executionMode = bot.isLiveMode ? '🔴 LIVE' : '📄 PAPER';
+        const proxyConfigured = !!(bot.liveExecutor?.proxyUrl && bot.liveExecutor?.proxyToken);
+
         const lines = [];
-        lines.push(`🎯 Arb Bot Daily Report`);
+        lines.push(`🎯 Arb Bot Daily Report — ${executionMode}`);
         lines.push(`Uptime: ${uptimeHours}h | Started: ${startedAt?.toISOString()?.slice(0, 16) || 'unknown'}`);
+        lines.push(`Proxy: ${proxyConfigured ? '✅ configured' : '❌ not configured'}`);
         lines.push('');
         
         // Portfolio
@@ -195,6 +199,8 @@ export function createDashboard(bot, trader, config = {}) {
 
         res.json({
             text: lines.join('\n'),
+            mode: bot.isLiveMode ? 'live' : 'paper',
+            proxyConfigured,
             portfolio,
             strategies: {
                 crossPlatform: { pairs: xpOpps.length, profitable: profitableXP.length },
@@ -202,6 +208,7 @@ export function createDashboard(bot, trader, config = {}) {
                 sameMarket: sameMarket,
                 combinatorial: combo.stats,
             },
+            liveExecutor: bot.liveExecutor?.getStatus() || null,
             cryptoPrices: binance,
             chainlink: bot.chainlinkFeed?.getSnapshot() || {},
             uptime: { hours: uptimeHours, since: startedAt?.toISOString() },
@@ -217,6 +224,26 @@ export function createDashboard(bot, trader, config = {}) {
     // Order manager status
     app.get('/api/order-manager', (req, res) => {
         res.json(bot.orderManager?.getStatus() || { pending: 0, stats: {} });
+    });
+
+    // Live executor status & audit log
+    app.get('/api/live-executor', (req, res) => {
+        res.json(bot.liveExecutor?.getStatus() || { mode: 'paper', stats: {} });
+    });
+
+    // Execution config — single view of mode, proxy, safety settings
+    app.get('/api/execution-config', (req, res) => {
+        const executor = bot.liveExecutor;
+        res.json({
+            mode: bot.isLiveMode ? 'live' : 'paper',
+            dryRun: executor ? executor.dryRun : true,
+            proxyConfigured: !!(executor?.proxyUrl && executor?.proxyToken),
+            proxyUrl: executor?.proxyUrl ? executor.proxyUrl.replace(/\/proxy.*/, '/...') : null,
+            kalshiCredsLoaded: !!executor?.kalshiCreds,
+            liquiditySafetyMargin: executor?.liquiditySafetyMargin || 0.5,
+            minOrderDollars: executor?.minOrderDollars || 1.10,
+            circuitBreaker: bot.circuitBreaker?.getStatus() || null,
+        });
     });
 
     // Daily stats — last 30 days
