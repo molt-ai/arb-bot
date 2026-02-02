@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Arb Bot — Live Dashboard</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0a0a0f">
+    <link rel="manifest" href="/manifest.json">
     <style>
         /* ===== RESET & BASE ===== */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -16,6 +18,41 @@
             overflow-x: hidden; min-height: 100vh;
             -webkit-overflow-scrolling: touch;
         }
+
+        /* ===== ALERT FEED ===== */
+        .alert-feed { max-height: 300px; overflow-y: auto; }
+        .alert-item {
+            display: flex; gap: 8px; align-items: flex-start;
+            padding: 8px 10px; border-radius: 8px; margin-bottom: 4px;
+            font-size: 0.82rem; line-height: 1.3;
+            animation: alertSlide 0.3s ease-out;
+        }
+        .alert-item.info { background: #1a1a2e; border-left: 3px solid #7c8aff; }
+        .alert-item.warn { background: #2a2418; border-left: 3px solid #f59e0b; }
+        .alert-item.critical { background: #2a1818; border-left: 3px solid #ef4444; }
+        .alert-item .alert-time { color: #666; font-size: 0.72rem; white-space: nowrap; min-width: 55px; }
+        .alert-item .alert-icon { font-size: 1rem; }
+        .alert-item .alert-msg { flex: 1; word-break: break-word; }
+        @keyframes alertSlide { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+        .alert-badge {
+            background: #ef4444; color: #fff; font-size: 0.65rem; font-weight: 700;
+            padding: 1px 6px; border-radius: 10px; vertical-align: super; margin-left: 4px;
+        }
+        .small-btn {
+            background: #1a1a2e; color: #7c8aff; border: 1px solid #2a2a3a;
+            padding: 6px 12px; border-radius: 6px; font-size: 0.75rem; cursor: pointer;
+            min-height: 36px; touch-action: manipulation;
+        }
+        .small-btn:active { background: #2a2a3e; }
+        .small-btn.enabled { background: #1a2e1a; color: #4ade80; border-color: #2a3a2a; }
+
+        .cb-badge {
+            padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;
+        }
+        .cb-ok { background: #1a2e1a; color: #4ade80; }
+        .cb-tripped { background: #2e1a1a; color: #ef4444; animation: pulse 1s infinite; }
+        @keyframes pulse { 50% { opacity: 0.6; } }
 
         /* ===== REFRESH INDICATOR ===== */
         .refresh-bar {
@@ -395,6 +432,24 @@
             </div>
         </div>
 
+        <!-- Alert Feed + Circuit Breaker -->
+        <div class="section" id="sec-alerts">
+            <div class="section-header" onclick="toggleSection('sec-alerts')">
+                <h2>🔔 Alerts <span id="alert-badge" class="alert-badge" style="display:none">0</span></h2>
+                <span class="section-toggle">▼</span>
+            </div>
+            <div class="section-body">
+                <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                    <button onclick="requestNotifyPermission()" id="notify-btn" class="small-btn">🔔 Enable Push</button>
+                    <button onclick="clearAlerts()" class="small-btn">Clear</button>
+                    <span id="cb-status" class="cb-badge cb-ok">CB: OK</span>
+                </div>
+                <div id="alert-feed" class="alert-feed">
+                    <div class="empty-state">No alerts yet — trades, errors, and circuit breaker events show here</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Opportunities & Positions side by side on desktop -->
         <div class="two-col-grid">
             <!-- Opportunities -->
@@ -540,16 +595,18 @@
         async function fetchAll() {
             showRefresh(true);
             try {
-                const [portfolio, opps, crypto, chainlink] = await Promise.all([
+                const [portfolio, opps, crypto, chainlink, cbData] = await Promise.all([
                     safeFetch('/api/portfolio'),
                     safeFetch('/api/opportunities'),
                     safeFetch('/api/crypto-speed'),
-                    safeFetch('/api/chainlink')
+                    safeFetch('/api/chainlink'),
+                    safeFetch('/api/circuit-breaker')
                 ]);
                 if (portfolio) updatePortfolio(portfolio);
                 if (opps) updateOpportunities(opps.opportunities || opps);
                 if (crypto) updateCryptoSpeed(crypto);
                 if (chainlink) updateChainlink(chainlink);
+                detectChanges(portfolio, cbData);
                 document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
             } catch (e) {
                 // silently skip
@@ -858,6 +915,124 @@
             lastWidth = window.innerWidth;
             if (crossed) fetchAll(); // re-render with correct layout
         });
+
+        // ===== NOTIFICATION & ALERT SYSTEM =====
+        let notifyPermission = Notification?.permission || 'default';
+        const alertHistory = JSON.parse(localStorage.getItem('arb-alerts') || '[]').slice(0, 100);
+        let lastTradeCount = null;
+        let lastCBState = null;
+        let alertUnread = 0;
+
+        function updateNotifyBtn() {
+            const btn = document.getElementById('notify-btn');
+            if (!btn) return;
+            if (notifyPermission === 'granted') {
+                btn.textContent = '🔔 Push On';
+                btn.classList.add('enabled');
+            } else if (notifyPermission === 'denied') {
+                btn.textContent = '🔕 Blocked';
+                btn.disabled = true;
+            }
+        }
+        updateNotifyBtn();
+
+        function requestNotifyPermission() {
+            if (!('Notification' in window)) { alert('Notifications not supported'); return; }
+            Notification.requestPermission().then(p => {
+                notifyPermission = p;
+                updateNotifyBtn();
+                if (p === 'granted') addAlert('info', 'Push notifications enabled — you\'ll get alerts even when the tab is in the background');
+            });
+        }
+        window.requestNotifyPermission = requestNotifyPermission;
+
+        function sendNotification(title, body, tag) {
+            if (notifyPermission !== 'granted') return;
+            if (document.hasFocus()) return; // don't notify when looking at dashboard
+            try {
+                const n = new Notification(title, {
+                    body, tag, icon: '🎯',
+                    badge: '🎯',
+                    vibrate: [200, 100, 200],
+                    requireInteraction: false,
+                });
+                setTimeout(() => n.close(), 10000);
+            } catch (e) { /* Safari doesn't support all options */ }
+        }
+
+        function addAlert(level, message) {
+            const now = new Date();
+            const entry = { level, message, time: now.toISOString(), timeStr: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) };
+            alertHistory.unshift(entry);
+            if (alertHistory.length > 100) alertHistory.length = 100;
+            localStorage.setItem('arb-alerts', JSON.stringify(alertHistory));
+            alertUnread++;
+            renderAlerts();
+        }
+
+        function renderAlerts() {
+            const feed = document.getElementById('alert-feed');
+            if (!feed) return;
+            if (alertHistory.length === 0) {
+                feed.innerHTML = '<div class="empty-state">No alerts yet</div>';
+            } else {
+                feed.innerHTML = alertHistory.slice(0, 50).map(a => {
+                    const icon = a.level === 'critical' ? '🚨' : a.level === 'warn' ? '⚠️' : 'ℹ️';
+                    const cls = a.level || 'info';
+                    const msg = (a.message || '').replace(/</g, '&lt;');
+                    return '<div class="alert-item ' + cls + '"><span class="alert-time">' + (a.timeStr || '') + '</span><span class="alert-icon">' + icon + '</span><span class="alert-msg">' + msg + '</span></div>';
+                }).join('');
+            }
+            // Badge
+            const badge = document.getElementById('alert-badge');
+            if (badge) {
+                if (alertUnread > 0) { badge.textContent = alertUnread; badge.style.display = 'inline'; }
+                else badge.style.display = 'none';
+            }
+        }
+        renderAlerts();
+
+        function clearAlerts() {
+            alertHistory.length = 0;
+            alertUnread = 0;
+            localStorage.removeItem('arb-alerts');
+            renderAlerts();
+        }
+        window.clearAlerts = clearAlerts;
+
+        // Detect changes between polls to generate alerts
+        function detectChanges(portfolio, cbData) {
+            if (!portfolio) return;
+            const trades = parseInt(portfolio.totalTrades) || 0;
+
+            // New trade detected
+            if (lastTradeCount !== null && trades > lastTradeCount) {
+                const diff = trades - lastTradeCount;
+                const pnl = portfolio.netPnL;
+                const msg = diff + ' new trade' + (diff > 1 ? 's' : '') + ' — P&L: $' + pnl + ' | Open: ' + portfolio.openPositions;
+                addAlert('info', '📈 ' + msg);
+                sendNotification('Arb Bot Trade', msg, 'trade-' + trades);
+            }
+            lastTradeCount = trades;
+
+            // Circuit breaker state change
+            if (cbData) {
+                const tripped = cbData.isTripped;
+                const cbEl = document.getElementById('cb-status');
+                if (cbEl) {
+                    cbEl.textContent = tripped ? '🛑 CB: TRIPPED' : 'CB: OK';
+                    cbEl.className = 'cb-badge ' + (tripped ? 'cb-tripped' : 'cb-ok');
+                }
+                if (lastCBState !== null && tripped && !lastCBState) {
+                    addAlert('critical', '🛑 Circuit breaker tripped: ' + (cbData.tripReason || 'unknown'));
+                    sendNotification('⚠️ Circuit Breaker', 'Trading halted: ' + (cbData.tripReason || 'unknown'), 'cb-trip');
+                } else if (lastCBState !== null && !tripped && lastCBState) {
+                    addAlert('info', '✅ Circuit breaker reset — trading resumed');
+                    sendNotification('Circuit Breaker Reset', 'Trading resumed', 'cb-reset');
+                }
+                lastCBState = tripped;
+            }
+        }
 
         // ===== INIT =====
         fetchAll();
