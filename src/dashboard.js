@@ -75,7 +75,10 @@ export function createDashboard(bot, trader, config = {}) {
 
     // Alert system status
     app.get('/api/alerts', (req, res) => {
-        res.json(bot.alerts?.getStatus() || { enabled: false });
+        res.json({
+            webhookAlerts: bot.alerts?.getStatus() || { enabled: false },
+            emailAlerts: bot.email?.getStatus() || { enabled: false },
+        });
     });
 
     // Circuit breaker status

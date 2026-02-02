@@ -10,6 +10,7 @@ import { PaperTrader } from './paper-trader.js';
 import { MarketScanner } from './market-scanner.js';
 import { createDashboard } from './dashboard.js';
 import { AlertManager } from './alerts.js';
+import { EmailAlerts } from './email-alerts.js';
 import { config } from '../config.js';
 import { loadKalshiCredentials, generateKalshiHeaders, generateKalshiRestHeaders } from './kalshi-auth.js';
 import { MARKET_PAIRS, POLY_GAMMA, resolvePair } from './market-pairs.js';
@@ -127,6 +128,13 @@ class LiveBot {
             cooldownMs: 60000,  // 1 alert per type per minute
         });
 
+        // Email alerts
+        this.email = new EmailAlerts({
+            from: process.env.GMAIL_USER,
+            to: process.env.ALERT_EMAIL_TO || process.env.GMAIL_USER,
+            appPassword: process.env.GMAIL_APP_PASSWORD,
+        });
+
         // Circuit breaker & execution lock
         this.circuitBreaker = new CircuitBreaker({
             maxPositionPerMarket: 50,
@@ -171,6 +179,7 @@ class LiveBot {
 
         // Alert: bot started
         this.alerts.botStarted().catch(() => {});
+        this.email.botStarted().catch(() => {});
 
         // 2. Scan & map markets (cross-platform arb)
         await this.scanMarkets();
@@ -741,6 +750,7 @@ class LiveBot {
                 ? `Poly YES (${poly.yes.toFixed(1)}¢) + Kalshi NO (${kalshi.no.toFixed(1)}¢) = ${bestArb.totalCost.toFixed(1)}¢ cost → ${bestArb.netProfit.toFixed(1)}¢ net profit`
                 : `Poly NO (${poly.no.toFixed(1)}¢) + Kalshi YES (${kalshi.yes.toFixed(1)}¢) = ${bestArb.totalCost.toFixed(1)}¢ cost → ${bestArb.netProfit.toFixed(1)}¢ net profit`;
             this.alerts.bigOpportunity({ name: mapping.name, netProfit: bestArb.netProfit, description: desc }).catch(() => {});
+            this.email.bigOpportunity({ name: mapping.name, netProfit: bestArb.netProfit, description: desc }).catch(() => {});
         }
     }
 
@@ -784,6 +794,7 @@ class LiveBot {
                 const fee = (trade.fees / 100).toFixed(2);
                 console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: $${(trade.totalCost/100).toFixed(2)} | Gross: ${trade.grossSpread.toFixed(1)}¢ | Fees: $${fee} | Net: +$${net} | Exec: ${elapsedMs}ms`);
                 this.alerts.tradeExecuted(trade).catch(() => {});
+            this.email.tradeExecuted(trade).catch(() => {});
                 if (this.dashboard) {
                     this.dashboard.broadcast('trade', trade);
                     this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
@@ -864,6 +875,8 @@ class LiveBot {
     stop() {
         this.alerts.botStopped('shutdown').catch(() => {});
         this.alerts.stop();
+        this.email.botStopped('shutdown').catch(() => {});
+        this.email.stop();
         if (this.autoRedeemer) this.autoRedeemer.stop();
         if (this.circuitBreaker) this.circuitBreaker.destroy();
         if (this.polyWs) this.polyWs.close();
