@@ -21,6 +21,7 @@
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@nevuamarkets/poly-websockets": "^1.0.0",
+    "better-sqlite3": "^12.6.2",
     "cors": "^2.8.6",
     "dotenv": "^16.0.0",
     "express": "^5.2.1",

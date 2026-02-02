@@ -9,7 +9,7 @@ import WebSocket from 'ws';
 import { PaperTrader } from './paper-trader.js';
 import { MarketScanner } from './market-scanner.js';
 import { createDashboard } from './dashboard.js';
-import { sendAlert } from './alerts.js';
+import { AlertManager } from './alerts.js';
 import { config } from '../config.js';
 import { loadKalshiCredentials, generateKalshiHeaders, generateKalshiRestHeaders } from './kalshi-auth.js';
 import { MARKET_PAIRS, POLY_GAMMA, resolvePair } from './market-pairs.js';
@@ -18,10 +18,63 @@ import { CryptoSpeedStrategy } from './crypto-speed.js';
 import { SameMarketArb } from './same-market-arb.js';
 import { CombinatorialArb } from './combinatorial-arb.js';
 import { ChainlinkFeed } from './chainlink-feed.js';
+import { AutoRedeemer } from './auto-redeem.js';
+import { OrderManager } from './order-manager.js';
+import { CircuitBreaker } from './circuit-breaker.js';
 
 const POLY_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const KALSHI_WS_URL = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
 const SCAN_INTERVAL_MS = 5 * 60 * 1000; // Re-scan every 5 min
+
+/**
+ * Execution Lock — promise-based mutex
+ * Ensures only one trade executes at a time
+ */
+class ExecutionLock {
+    constructor() {
+        this._locked = false;
+        this._queue = [];
+        this.skippedCount = 0;
+    }
+
+    get isLocked() {
+        return this._locked;
+    }
+
+    /**
+     * Try to acquire the lock. Returns true if acquired, false if busy.
+     */
+    tryAcquire() {
+        if (this._locked) return false;
+        this._locked = true;
+        return true;
+    }
+
+    /**
+     * Acquire the lock (blocking). Returns a promise that resolves when lock is acquired.
+     */
+    acquire() {
+        if (!this._locked) {
+            this._locked = true;
+            return Promise.resolve(true);
+        }
+        return new Promise(resolve => {
+            this._queue.push(resolve);
+        });
+    }
+
+    /**
+     * Release the lock. If others are waiting, hand off to next in queue.
+     */
+    release() {
+        if (this._queue.length > 0) {
+            const next = this._queue.shift();
+            next(true);
+        } else {
+            this._locked = false;
+        }
+    }
+}
 
 class LiveBot {
     constructor() {
@@ -67,6 +120,31 @@ class LiveBot {
             this.kalshiCreds = null;
         }
 
+        // Alert system
+        this.alerts = new AlertManager({
+            webhookUrl: process.env.ALERT_WEBHOOK_URL || null,
+            cooldownMs: 60000,  // 1 alert per type per minute
+        });
+
+        // Circuit breaker & execution lock
+        this.circuitBreaker = new CircuitBreaker({
+            maxPositionPerMarket: 50,
+            maxTotalPosition: 200,
+            maxDailyLoss: 5000,          // $50 in cents
+            maxConsecutiveErrors: 5,
+            cooldownMs: 60000,
+        });
+        this.executionLock = new ExecutionLock();
+
+        // Auto-redemption & order management
+        this.autoRedeemer = new AutoRedeemer(this.polymarket, this.kalshi, this.trader, {
+            intervalMs: 5 * 60 * 1000,   // Check every 5 minutes
+            gracePeriodMs: 2 * 60 * 1000, // 2 min grace after expiry
+        });
+        this.orderManager = new OrderManager({
+            timeoutMs: 10000, // 10 second timeout per order
+        });
+
         // New strategies
         this.binanceFeed = new BinanceFeed();
         this.chainlinkFeed = new ChainlinkFeed();
@@ -90,6 +168,9 @@ class LiveBot {
         this.dashboard = createDashboard(this, this.trader, { port: 3456 });
         await this.dashboard.ready;
 
+        // Alert: bot started
+        this.alerts.botStarted().catch(() => {});
+
         // 2. Scan & map markets (cross-platform arb)
         await this.scanMarkets();
 
@@ -108,13 +189,16 @@ class LiveBot {
         // 6. Start combinatorial arb (entity matcher)
         await this.combinatorialArb.start();
 
-        // 7. Re-scan periodically
+        // 7. Start auto-redemption engine
+        this.autoRedeemer.start();
+
+        // 8. Re-scan periodically
         setInterval(() => this.scanMarkets(), SCAN_INTERVAL_MS);
 
-        // 7. Tick every 10s — check exits, broadcast state
+        // 9. Tick every 10s — check exits, broadcast state
         setInterval(() => this.tick(), 10000);
 
-        // 8. Kalshi REST fallback every 30s (in case WS misses something)
+        // 10. Kalshi REST fallback every 30s (in case WS misses something)
         setInterval(() => this.pollKalshiFallback(), 30000);
 
         console.log('\n[LIVE] Bot running — 4 strategies active. Dashboard live.\n');
@@ -629,25 +713,81 @@ class LiveBot {
         this.currentOpportunities.sort((a, b) => b.netProfit - a.netProfit);
         this.lastUpdate = new Date().toISOString();
 
-        // Paper trade — trader checks profitability internally
-        const trade = this.trader.executeTrade(opp);
-        if (trade) {
-            const net = (trade.expectedNetProfit / 100).toFixed(2);
-            const fee = (trade.fees / 100).toFixed(2);
-            console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: $${(trade.totalCost/100).toFixed(2)} | Gross: ${trade.grossSpread.toFixed(1)}¢ | Fees: $${fee} | Net: +$${net}`);
-            if (this.dashboard) {
-                this.dashboard.broadcast('trade', trade);
-                this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
-            }
-        }
+        // Paper trade — gate through circuit breaker + execution lock
+        this._executeSafeTrade(opp);
 
         // Alert real opportunities (profitable after fees)
         if (bestArb.isProfitable && bestArb.netProfit >= this.config.alertThresholdCents) {
             const desc = strategy === 1
                 ? `Poly YES (${poly.yes.toFixed(1)}¢) + Kalshi NO (${kalshi.no.toFixed(1)}¢) = ${bestArb.totalCost.toFixed(1)}¢ cost → ${bestArb.netProfit.toFixed(1)}¢ net profit`
                 : `Poly NO (${poly.no.toFixed(1)}¢) + Kalshi YES (${kalshi.yes.toFixed(1)}¢) = ${bestArb.totalCost.toFixed(1)}¢ cost → ${bestArb.netProfit.toFixed(1)}¢ net profit`;
-            sendAlert({ outcome: mapping.name, profit: bestArb.netProfit, description: desc }).catch(() => {});
+            this.alerts.bigOpportunity({ name: mapping.name, netProfit: bestArb.netProfit, description: desc }).catch(() => {});
         }
+    }
+
+    // ── Safe Trade Execution (circuit breaker + lock + balance reservation) ──
+
+    async _executeSafeTrade(opp) {
+        // 1. Check circuit breaker
+        const context = this._getPositionContext();
+        const cbCheck = this.circuitBreaker.check(opp, context);
+        if (!cbCheck.allowed) {
+            // Only log circuit breaker blocks occasionally to avoid spam
+            if (!this._lastCBLog || Date.now() - this._lastCBLog > 30000) {
+                console.log(`[CIRCUIT-BREAKER] Blocked: ${cbCheck.reason}`);
+                this._lastCBLog = Date.now();
+            }
+            return;
+        }
+
+        // 2. Try to acquire execution lock (non-blocking)
+        if (!this.executionLock.tryAcquire()) {
+            this.executionLock.skippedCount++;
+            console.log(`[LOCK] Skipped: execution busy (${this.executionLock.skippedCount} total skips)`);
+            return;
+        }
+
+        try {
+            // 3. Execute trade (paper trader handles balance reservation internally)
+            const trade = this.trader.executeTrade(opp);
+            if (trade) {
+                // 4. Record success with circuit breaker
+                this.circuitBreaker.recordSuccess();
+
+                const net = (trade.expectedNetProfit / 100).toFixed(2);
+                const fee = (trade.fees / 100).toFixed(2);
+                console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: $${(trade.totalCost/100).toFixed(2)} | Gross: ${trade.grossSpread.toFixed(1)}¢ | Fees: $${fee} | Net: +$${net}`);
+                this.alerts.tradeExecuted(trade).catch(() => {});
+                if (this.dashboard) {
+                    this.dashboard.broadcast('trade', trade);
+                    this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
+                }
+            }
+        } catch (err) {
+            // 5. Record error with circuit breaker
+            this.circuitBreaker.recordError(err);
+            console.error(`[TRADE-ERROR] ${opp.name}: ${err.message}`);
+        } finally {
+            // 6. Always release the lock
+            this.executionLock.release();
+        }
+    }
+
+    /**
+     * Build position context for circuit breaker checks
+     */
+    _getPositionContext() {
+        const positions = this.trader.state.positions || [];
+        const currentPositions = new Map();
+        let totalContracts = 0;
+
+        for (const pos of positions) {
+            const existing = currentPositions.get(pos.name) || 0;
+            currentPositions.set(pos.name, existing + (pos.contracts || 0));
+            totalContracts += (pos.contracts || 0);
+        }
+
+        return { currentPositions, totalContracts };
     }
 
     // ── Tick (every 10s) ────────────────────────────────────
@@ -658,6 +798,7 @@ class LiveBot {
         for (const trade of closed) {
             const net = trade.netPnl >= 0 ? `+$${(trade.netPnl/100).toFixed(2)}` : `-$${Math.abs(trade.netPnl/100).toFixed(2)}`;
             console.log(`📉 STOP-LOSS ${trade.name} | Net: ${net} | Hold: ${Math.round(trade.holdTime/1000)}s`);
+            this.alerts.positionRedeemed(trade.name, trade.netPnl).catch(() => {});
             if (this.dashboard) {
                 this.dashboard.broadcast('trade', trade);
                 this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
@@ -688,6 +829,8 @@ class LiveBot {
     }
 
     stop() {
+        this.alerts.botStopped('shutdown').catch(() => {});
+        this.alerts.stop();
         if (this.polyWs) this.polyWs.close();
         if (this.kalshiWs) this.kalshiWs.close();
         if (this.binanceFeed) this.binanceFeed.stop();

@@ -72,6 +72,11 @@ export function createDashboard(bot, trader, config = {}) {
         res.json(bot.combinatorialArb?.getState() || { stats: {}, opportunities: [] });
     });
 
+    // Alert system status
+    app.get('/api/alerts', (req, res) => {
+        res.json(bot.alerts?.getStatus() || { enabled: false });
+    });
+
     // Chainlink price feed data
     app.get('/api/chainlink', (req, res) => {
         const cl = bot.chainlinkFeed;

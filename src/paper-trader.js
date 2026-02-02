@@ -29,6 +29,10 @@ export class PaperTrader {
         
         this.state = this.loadState();
         this.trades = this.loadTrades();
+
+        // Balance reservation tracking
+        // Maps tradeId → { polyAmount, kalshiAmount, timestamp }
+        this.reservations = new Map();
     }
 
     /**
@@ -169,6 +173,69 @@ export class PaperTrader {
     }
 
     /**
+     * Get available balance (total minus reserved)
+     */
+    getAvailableBalance() {
+        let reservedPoly = 0;
+        let reservedKalshi = 0;
+        for (const r of this.reservations.values()) {
+            reservedPoly += r.polyAmount;
+            reservedKalshi += r.kalshiAmount;
+        }
+        return {
+            polyAvailable: this.state.polyBalance - reservedPoly,
+            kalshiAvailable: this.state.kalshiBalance - reservedKalshi,
+            reservedPoly,
+            reservedKalshi,
+        };
+    }
+
+    /**
+     * Reserve balance before trade execution
+     * Immediately deducts from available balance to prevent double-spending
+     * @param {string} tradeId — unique trade identifier
+     * @param {number} polyAmount — cents to reserve on Polymarket side
+     * @param {number} kalshiAmount — cents to reserve on Kalshi side
+     * @returns {boolean} true if reservation succeeded
+     */
+    reserveBalance(tradeId, polyAmount, kalshiAmount) {
+        const avail = this.getAvailableBalance();
+        if (polyAmount > avail.polyAvailable || kalshiAmount > avail.kalshiAvailable) {
+            return false;
+        }
+        this.reservations.set(tradeId, {
+            polyAmount,
+            kalshiAmount,
+            timestamp: Date.now(),
+        });
+        return true;
+    }
+
+    /**
+     * Commit a reservation — the trade filled, actually deduct from balance
+     * @param {string} tradeId
+     */
+    commitReservation(tradeId) {
+        const reservation = this.reservations.get(tradeId);
+        if (!reservation) return;
+        // Balance was already logically deducted via reservation;
+        // now physically deduct it (executeTrade does this, so just clear the reservation)
+        this.reservations.delete(tradeId);
+    }
+
+    /**
+     * Release a reservation — trade failed, return reserved balance
+     * @param {string} tradeId
+     */
+    releaseReservation(tradeId) {
+        const reservation = this.reservations.get(tradeId);
+        if (!reservation) return;
+        // Since reservation only logically blocked the balance (not physically deducted),
+        // just removing the reservation frees it up
+        this.reservations.delete(tradeId);
+    }
+
+    /**
      * Execute a paper trade — only if profitable after fees on resolution
      */
     executeTrade(opportunity) {
@@ -200,16 +267,24 @@ export class PaperTrader {
         const totalCost = polyCost + kalshiCost;
         const totalFees = arb.fees * this.contractSize;
 
-        if (polyCost > this.state.polyBalance || kalshiCost > this.state.kalshiBalance) return null;
+        // Check available balance (accounting for reservations)
+        const avail = this.getAvailableBalance();
+        if (polyCost > avail.polyAvailable || kalshiCost > avail.kalshiAvailable) return null;
 
-        // Execute
+        // Reserve balance, then execute
+        const tradeId = `t-${Date.now()}`;
+        if (!this.reserveBalance(tradeId, polyCost, kalshiCost)) return null;
+
         this.state.polyBalance -= polyCost;
         this.state.kalshiBalance -= kalshiCost;
         this.state.totalTrades++;
 
+        // Commit the reservation (balance now physically deducted)
+        this.commitReservation(tradeId);
+
         const now = new Date();
         const position = {
-            id: `t-${Date.now()}`,
+            id: tradeId,
             name,
             strategy,
             polySide,
