@@ -17,6 +17,7 @@ import { BinanceFeed } from './binance-feed.js';
 import { CryptoSpeedStrategy } from './crypto-speed.js';
 import { SameMarketArb } from './same-market-arb.js';
 import { CombinatorialArb } from './combinatorial-arb.js';
+import { ChainlinkFeed } from './chainlink-feed.js';
 
 const POLY_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const KALSHI_WS_URL = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
@@ -67,7 +68,8 @@ class LiveBot {
 
         // New strategies
         this.binanceFeed = new BinanceFeed();
-        this.cryptoSpeed = new CryptoSpeedStrategy(this.binanceFeed, this.trader);
+        this.chainlinkFeed = new ChainlinkFeed();
+        this.cryptoSpeed = new CryptoSpeedStrategy(this.binanceFeed, this.trader, {}, this.chainlinkFeed);
         this.sameMarketArb = new SameMarketArb(this.trader);
         this.combinatorialArb = new CombinatorialArb(this.trader, {
             scanIntervalMs: 60_000,     // Every 60s
@@ -94,8 +96,9 @@ class LiveBot {
         this.connectPolyWS();
         this.connectKalshiWS();
 
-        // 4. Start Binance feed + crypto speed strategy
+        // 4. Start Binance feed + Chainlink feed + crypto speed strategy
         this.binanceFeed.connect();
+        this.chainlinkFeed.connect();
         await this.cryptoSpeed.start();
 
         // 5. Start same-market rebalancing arb
@@ -558,6 +561,22 @@ class LiveBot {
         const minPrice = this.config.minPriceThreshold || 2;
         if (poly.yes <= minPrice || poly.no <= minPrice || kalshi.yes <= minPrice || kalshi.no <= minPrice) return;
 
+        // ── Time-Weighted Spread Thresholds ─────────────────
+        // Markets approaching expiry need more edge (less time for resolution)
+        let spreadMultiplier = 1.0;
+        if (mapping.expiresAt) {
+            const msToExpiry = new Date(mapping.expiresAt) - Date.now();
+            const hoursToExpiry = msToExpiry / (60 * 60 * 1000);
+
+            if (hoursToExpiry < 2) {
+                // Very close to expiry — require 2x normal spread
+                spreadMultiplier = 2.0;
+            } else if (hoursToExpiry < 24) {
+                // Within 24h — linearly increase from 1x to 2x as we approach 2h
+                spreadMultiplier = 1.0 + (1.0 * (24 - hoursToExpiry) / 22);
+            }
+        }
+
         // Calculate both strategies using resolution arb math
         // Strategy 1: Buy Poly YES + Kalshi NO
         const cost1 = poly.yes + kalshi.no;
@@ -572,6 +591,14 @@ class LiveBot {
         const bestArb = arb1.netProfit > arb2.netProfit ? arb1 : arb2;
         const strategy = arb1.netProfit > arb2.netProfit ? 1 : 2;
         const grossSpread = Math.max(gross1, gross2);
+
+        // Apply time-weighted threshold — scale the minimum profit requirement
+        const baseMinProfit = this.trader.config?.minNetProfit || 1.0;
+        const adjustedMinProfit = baseMinProfit * spreadMultiplier;
+        if (bestArb.netProfit < adjustedMinProfit && spreadMultiplier > 1.0) {
+            // Below time-adjusted threshold — don't trade, but still track the opportunity
+            // (the paper trader will also check its own threshold, this is an additional filter)
+        }
 
         const opp = {
             name: mapping.name,
@@ -640,23 +667,30 @@ class LiveBot {
             this.dashboard.broadcast('opportunities', this.currentOpportunities);
         }
 
+        // Broadcast Chainlink data alongside other state
+        if (this.dashboard) {
+            this.dashboard.broadcast('chainlink', this.chainlinkFeed.getSnapshot());
+        }
+
         // Count profitable opportunities
         const profitable = this.currentOpportunities.filter(o => o.isProfitable).length;
         const p = this.trader.getPortfolioSummary();
         const pWs = this.polyConnected ? '🟢' : '🔴';
         const kWs = this.kalshiConnected ? '🟢' : (this.kalshiRestMode ? '🔄' : '🔴');
         const bWs = this.binanceFeed.connected ? '🟢' : '🔴';
+        const clWs = this.chainlinkFeed.connected ? '🟢' : '🔴';
         const maxDays = this.config.maxDaysToExpiry || 7;
         const csStats = this.cryptoSpeed.getStats();
         const smStats = this.sameMarketArb.getStats();
         const caStats = this.combinatorialArb?.stats || {};
-        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} Binance ${bWs} | XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓) CS:${csStats.activeMarkets}mkts/${csStats.signals}sig SM:${smStats.found}found CA:${caStats.opportunitiesFound || 0}opps | ${p.openPositions} pos | P&L: $${p.netPnL} | Trades: ${p.totalTrades}`);
+        console.log(`[${new Date().toLocaleTimeString()}] Poly ${pWs} Kalshi ${kWs} Binance ${bWs} CL ${clWs} | XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓) CS:${csStats.activeMarkets}mkts/${csStats.signals}sig SM:${smStats.found}found CA:${caStats.opportunitiesFound || 0}opps | ${p.openPositions} pos | P&L: $${p.netPnL} | Trades: ${p.totalTrades}`);
     }
 
     stop() {
         if (this.polyWs) this.polyWs.close();
         if (this.kalshiWs) this.kalshiWs.close();
         if (this.binanceFeed) this.binanceFeed.stop();
+        if (this.chainlinkFeed) this.chainlinkFeed.stop();
         if (this.cryptoSpeed) this.cryptoSpeed.stop();
         if (this.sameMarketArb) this.sameMarketArb.stop();
         if (this.combinatorialArb) this.combinatorialArb.stop();

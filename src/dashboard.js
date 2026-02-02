@@ -72,6 +72,24 @@ export function createDashboard(bot, trader, config = {}) {
         res.json(bot.combinatorialArb?.getState() || { stats: {}, opportunities: [] });
     });
 
+    // Chainlink price feed data
+    app.get('/api/chainlink', (req, res) => {
+        const cl = bot.chainlinkFeed;
+        if (!cl) {
+            return res.json({ connected: false, prices: {} });
+        }
+        const snapshot = cl.getSnapshot();
+        // Also compute divergence against exchange prices
+        const divergence = {};
+        for (const ticker of ['BTC', 'ETH', 'SOL']) {
+            const exchangePrice = bot.binanceFeed?.getPrice(ticker) || 0;
+            if (exchangePrice > 0) {
+                divergence[ticker] = cl.getDivergence(ticker, exchangePrice);
+            }
+        }
+        res.json({ ...snapshot, divergence });
+    });
+
     // Daily report endpoint — summary of bot activity
     app.get('/api/report', (req, res) => {
         const portfolio = trader.getPortfolioSummary();
@@ -114,6 +132,20 @@ export function createDashboard(bot, trader, config = {}) {
             if (binance.ETH) lines.push(`Ξ ETH: $${binance.ETH.price?.toLocaleString() || '?'}`);
             if (binance.SOL) lines.push(`◎ SOL: $${binance.SOL.price?.toLocaleString() || '?'}`);
         }
+
+        // Chainlink price feed status
+        const chainlink = bot.chainlinkFeed?.getSnapshot() || {};
+        if (chainlink.prices?.BTC?.price) {
+            lines.push('');
+            lines.push(`🔗 Chainlink: BTC $${chainlink.prices.BTC.price.toLocaleString()} (${chainlink.connected ? '🟢 live' : '🔴 offline'})`);
+            // Show divergence if both prices available
+            if (binance.BTC?.price && chainlink.prices.BTC.price) {
+                const div = bot.chainlinkFeed?.getDivergence('BTC', binance.BTC.price) || {};
+                if (div.divergencePct !== null) {
+                    lines.push(`   Exchange vs Chainlink: ${div.divergencePct > 0 ? '+' : ''}${div.divergencePct.toFixed(3)}% ($${div.divergenceUsd?.toFixed(2)})`);
+                }
+            }
+        }
         
         // Active opportunities
         if (combo.opportunities.length > 0) {
@@ -143,6 +175,7 @@ export function createDashboard(bot, trader, config = {}) {
                 combinatorial: combo.stats,
             },
             cryptoPrices: binance,
+            chainlink: bot.chainlinkFeed?.getSnapshot() || {},
             uptime: { hours: uptimeHours, since: startedAt?.toISOString() },
             generatedAt: new Date().toISOString(),
         });
@@ -162,7 +195,8 @@ export function createDashboard(bot, trader, config = {}) {
             type: 'init',
             data: {
                 portfolio: trader.getPortfolioSummary(),
-                opportunities: bot.currentOpportunities || []
+                opportunities: bot.currentOpportunities || [],
+                chainlink: bot.chainlinkFeed?.getSnapshot() || {},
             },
             timestamp: Date.now()
         }));
