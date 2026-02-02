@@ -83,11 +83,12 @@ class LiveBot {
         console.log('║   XP + Crypto Speed + Rebalance + Combinatorial  ║');
         console.log('╚═══════════════════════════════════════════════════╝\n');
 
-        // 1. Scan & map markets (cross-platform arb)
-        await this.scanMarkets();
-
-        // 2. Start dashboard
+        // 1. Start dashboard FIRST and WAIT for it to bind — Fly health checks need the port open
         this.dashboard = createDashboard(this, this.trader, { port: 3456 });
+        await this.dashboard.ready;
+
+        // 2. Scan & map markets (cross-platform arb)
+        await this.scanMarkets();
 
         // 3. Connect BOTH platform WebSockets
         this.connectPolyWS();

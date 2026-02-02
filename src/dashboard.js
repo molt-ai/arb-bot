@@ -17,6 +17,11 @@ export function createDashboard(bot, trader, config = {}) {
     const server = createServer(app);
     const wss = new WebSocketServer({ server });
 
+    // Health check — responds immediately, no dependencies
+    app.get('/health', (req, res) => {
+        res.json({ ok: true, uptime: process.uptime() });
+    });
+
     // Serve static files
     app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -163,12 +168,16 @@ export function createDashboard(bot, trader, config = {}) {
         }));
     });
 
-    server.listen(port, '0.0.0.0', () => {
-        console.log(`[DASHBOARD] Live at http://localhost:${port}`);
-        console.log(`[DASHBOARD] Network: http://192.168.86.23:${port}`);
+    const ready = new Promise((resolve, reject) => {
+        server.listen(port, '0.0.0.0', () => {
+            console.log(`[DASHBOARD] Live at http://localhost:${port}`);
+            console.log(`[DASHBOARD] Network: http://0.0.0.0:${port}`);
+            resolve();
+        });
+        server.on('error', reject);
     });
 
-    return { app, server, wss, broadcast };
+    return { app, server, wss, broadcast, ready };
 }
 
 export default createDashboard;
