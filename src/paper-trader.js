@@ -8,11 +8,22 @@
  * - At resolution, ONE side pays $1 guaranteed
  * - Profit = 100¢ - totalCost - fees (regardless of outcome)
  * - HOLD TO RESOLUTION — don't flip on price swings
+ * 
+ * STORAGE: SQLite (primary) with JSON fallback
  */
 
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+    insertTrade as dbInsertTrade,
+    getTrades as dbGetTrades,
+    getRecentTrades as dbGetRecentTrades,
+    getPortfolioState,
+    setPortfolioState,
+    getAllPortfolioState,
+    migrateFromJson,
+} from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TRADE_LOG_PATH = path.join(__dirname, '..', 'data', 'trades.json');
@@ -27,12 +38,31 @@ export class PaperTrader {
         // Minimum guaranteed profit after fees to enter (cents per contract)
         this.minNetProfit = config.minNetProfit || 1.0; // At least 1¢/contract profit
         
+        // Track whether SQLite is working
+        this.useSqlite = true;
+
+        // Attempt JSON → SQLite migration on first run
+        this._migrateIfNeeded();
+
         this.state = this.loadState();
         this.trades = this.loadTrades();
+    }
 
-        // Balance reservation tracking
-        // Maps tradeId → { polyAmount, kalshiAmount, timestamp }
-        this.reservations = new Map();
+    /**
+     * Migrate existing JSON data into SQLite on first run.
+     * Non-destructive: only runs if SQLite is empty.
+     */
+    _migrateIfNeeded() {
+        try {
+            const ok = migrateFromJson(TRADE_LOG_PATH);
+            if (!ok) {
+                console.warn('[PAPER-TRADER] SQLite migration failed, using JSON fallback');
+                this.useSqlite = false;
+            }
+        } catch (e) {
+            console.warn('[PAPER-TRADER] SQLite unavailable:', e.message);
+            this.useSqlite = false;
+        }
     }
 
     /**
@@ -126,10 +156,27 @@ export class PaperTrader {
     }
 
     loadState() {
+        // Try SQLite first
+        if (this.useSqlite) {
+            try {
+                const state = getAllPortfolioState();
+                if (state && Object.keys(state).length > 0) {
+                    console.log('[PAPER-TRADER] Loaded state from SQLite');
+                    return {
+                        ...this._defaultState(),
+                        ...state,
+                    };
+                }
+            } catch (e) {
+                console.warn('[PAPER-TRADER] SQLite state load failed:', e.message);
+            }
+        }
+
+        // Fall back to JSON
         try {
             if (fs.existsSync(STATE_PATH)) {
                 const loaded = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
-                // Preserve loaded state but ensure new fields exist
+                console.log('[PAPER-TRADER] Loaded state from JSON');
                 return {
                     ...this._defaultState(),
                     ...loaded
@@ -157,82 +204,93 @@ export class PaperTrader {
     }
 
     loadTrades() {
+        // Try SQLite first
+        if (this.useSqlite) {
+            try {
+                const rows = dbGetTrades();
+                if (rows !== null) {
+                    // Convert SQL rows back to the in-memory format for compatibility
+                    const trades = rows.map(r => this._rowToTrade(r));
+                    console.log(`[PAPER-TRADER] Loaded ${trades.length} trades from SQLite`);
+                    return trades;
+                }
+            } catch (e) {
+                console.warn('[PAPER-TRADER] SQLite trades load failed:', e.message);
+            }
+        }
+
+        // Fall back to JSON
         try {
             if (fs.existsSync(TRADE_LOG_PATH)) {
-                return JSON.parse(fs.readFileSync(TRADE_LOG_PATH, 'utf8'));
+                const trades = JSON.parse(fs.readFileSync(TRADE_LOG_PATH, 'utf8'));
+                console.log(`[PAPER-TRADER] Loaded ${trades.length} trades from JSON`);
+                return trades;
             }
         } catch (e) { /* ignore */ }
         return [];
     }
 
+    /**
+     * Convert a SQLite row to the in-memory trade format.
+     */
+    _rowToTrade(row) {
+        return {
+            id: row.id,
+            name: row.name,
+            type: row.type,
+            strategy: row.strategy,
+            polySide: row.poly_side,
+            kalshiSide: row.kalshi_side,
+            polyPrice: row.poly_price,
+            kalshiPrice: row.kalshi_price,
+            contracts: row.contracts,
+            totalCost: row.total_cost,
+            grossSpread: row.gross_spread,
+            fees: row.fees,
+            expectedNetProfit: row.expected_net_profit,
+            netPnl: row.actual_net_pnl,
+            expiresAt: row.expires_at,
+            entryTime: row.entry_time,
+            exitTime: row.exit_time,
+            holdTime: row.hold_time_ms,
+            payout: row.payout,
+            timestamp: row.timestamp,
+        };
+    }
+
     save() {
+        // Always write JSON (fallback + backward compat)
         const dataDir = path.join(__dirname, '..', 'data');
         if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
         fs.writeFileSync(STATE_PATH, JSON.stringify(this.state, null, 2));
         fs.writeFileSync(TRADE_LOG_PATH, JSON.stringify(this.trades, null, 2));
-    }
 
-    /**
-     * Get available balance (total minus reserved)
-     */
-    getAvailableBalance() {
-        let reservedPoly = 0;
-        let reservedKalshi = 0;
-        for (const r of this.reservations.values()) {
-            reservedPoly += r.polyAmount;
-            reservedKalshi += r.kalshiAmount;
+        // Also persist state to SQLite
+        if (this.useSqlite) {
+            try {
+                // Save each state field individually for granular access
+                for (const [key, value] of Object.entries(this.state)) {
+                    setPortfolioState(key, value);
+                }
+            } catch (e) {
+                console.warn('[PAPER-TRADER] SQLite state save failed:', e.message);
+                this.useSqlite = false;
+            }
         }
-        return {
-            polyAvailable: this.state.polyBalance - reservedPoly,
-            kalshiAvailable: this.state.kalshiBalance - reservedKalshi,
-            reservedPoly,
-            reservedKalshi,
-        };
     }
 
     /**
-     * Reserve balance before trade execution
-     * Immediately deducts from available balance to prevent double-spending
-     * @param {string} tradeId — unique trade identifier
-     * @param {number} polyAmount — cents to reserve on Polymarket side
-     * @param {number} kalshiAmount — cents to reserve on Kalshi side
-     * @returns {boolean} true if reservation succeeded
+     * Persist a single trade to SQLite (called on each new trade)
      */
-    reserveBalance(tradeId, polyAmount, kalshiAmount) {
-        const avail = this.getAvailableBalance();
-        if (polyAmount > avail.polyAvailable || kalshiAmount > avail.kalshiAvailable) {
-            return false;
+    _saveTrade(trade) {
+        if (this.useSqlite) {
+            try {
+                dbInsertTrade(trade);
+            } catch (e) {
+                console.warn('[PAPER-TRADER] SQLite trade save failed:', e.message);
+                this.useSqlite = false;
+            }
         }
-        this.reservations.set(tradeId, {
-            polyAmount,
-            kalshiAmount,
-            timestamp: Date.now(),
-        });
-        return true;
-    }
-
-    /**
-     * Commit a reservation — the trade filled, actually deduct from balance
-     * @param {string} tradeId
-     */
-    commitReservation(tradeId) {
-        const reservation = this.reservations.get(tradeId);
-        if (!reservation) return;
-        // Balance was already logically deducted via reservation;
-        // now physically deduct it (executeTrade does this, so just clear the reservation)
-        this.reservations.delete(tradeId);
-    }
-
-    /**
-     * Release a reservation — trade failed, return reserved balance
-     * @param {string} tradeId
-     */
-    releaseReservation(tradeId) {
-        const reservation = this.reservations.get(tradeId);
-        if (!reservation) return;
-        // Since reservation only logically blocked the balance (not physically deducted),
-        // just removing the reservation frees it up
-        this.reservations.delete(tradeId);
     }
 
     /**
@@ -267,24 +325,16 @@ export class PaperTrader {
         const totalCost = polyCost + kalshiCost;
         const totalFees = arb.fees * this.contractSize;
 
-        // Check available balance (accounting for reservations)
-        const avail = this.getAvailableBalance();
-        if (polyCost > avail.polyAvailable || kalshiCost > avail.kalshiAvailable) return null;
+        if (polyCost > this.state.polyBalance || kalshiCost > this.state.kalshiBalance) return null;
 
-        // Reserve balance, then execute
-        const tradeId = `t-${Date.now()}`;
-        if (!this.reserveBalance(tradeId, polyCost, kalshiCost)) return null;
-
+        // Execute
         this.state.polyBalance -= polyCost;
         this.state.kalshiBalance -= kalshiCost;
         this.state.totalTrades++;
 
-        // Commit the reservation (balance now physically deducted)
-        this.commitReservation(tradeId);
-
         const now = new Date();
         const position = {
-            id: tradeId,
+            id: `t-${Date.now()}`,
             name,
             strategy,
             polySide,
@@ -305,6 +355,7 @@ export class PaperTrader {
 
         const trade = { ...position, type: 'ENTRY', timestamp: now.toISOString() };
         this.trades.push(trade);
+        this._saveTrade(trade);
         this.save();
         return trade;
     }
@@ -363,6 +414,7 @@ export class PaperTrader {
         };
 
         this.trades.push(trade);
+        this._saveTrade(trade);
         this.save();
         return trade;
     }
@@ -428,6 +480,7 @@ export class PaperTrader {
         };
 
         this.trades.push(trade);
+        this._saveTrade(trade);
         this.save();
         return trade;
     }

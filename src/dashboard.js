@@ -8,6 +8,7 @@ import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getDailyStats, getRecentNearMisses } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,6 +76,25 @@ export function createDashboard(bot, trader, config = {}) {
     // Alert system status
     app.get('/api/alerts', (req, res) => {
         res.json(bot.alerts?.getStatus() || { enabled: false });
+    });
+
+    // Circuit breaker status
+    app.get('/api/circuit-breaker', (req, res) => {
+        const cb = bot.circuitBreaker;
+        if (!cb) {
+            return res.json({ error: 'Circuit breaker not initialized' });
+        }
+        res.json(cb.getStatus());
+    });
+
+    // Circuit breaker reset
+    app.post('/api/circuit-breaker/reset', (req, res) => {
+        const cb = bot.circuitBreaker;
+        if (!cb) {
+            return res.status(404).json({ error: 'Circuit breaker not initialized' });
+        }
+        cb.reset();
+        res.json({ ok: true, status: cb.getStatus() });
     });
 
     // Chainlink price feed data
@@ -186,6 +206,34 @@ export function createDashboard(bot, trader, config = {}) {
         });
     });
 
+    // Auto-redemption status
+    app.get('/api/auto-redeem', (req, res) => {
+        res.json(bot.autoRedeemer?.getStatus() || { running: false, stats: {} });
+    });
+
+    // Order manager status
+    app.get('/api/order-manager', (req, res) => {
+        res.json(bot.orderManager?.getStatus() || { pending: 0, stats: {} });
+    });
+
+    // Daily stats — last 30 days
+    app.get('/api/stats/daily', (req, res) => {
+        const stats = getDailyStats(30);
+        if (stats === null) {
+            return res.status(503).json({ error: 'SQLite unavailable' });
+        }
+        res.json({ stats });
+    });
+
+    // Near misses — last 50
+    app.get('/api/near-misses', (req, res) => {
+        const misses = getRecentNearMisses(50);
+        if (misses === null) {
+            return res.status(503).json({ error: 'SQLite unavailable' });
+        }
+        res.json({ nearMisses: misses });
+    });
+
     // WebSocket broadcast
     const broadcast = (type, data) => {
         const msg = JSON.stringify({ type, data, timestamp: Date.now() });
@@ -202,6 +250,7 @@ export function createDashboard(bot, trader, config = {}) {
                 portfolio: trader.getPortfolioSummary(),
                 opportunities: bot.currentOpportunities || [],
                 chainlink: bot.chainlinkFeed?.getSnapshot() || {},
+                circuitBreaker: bot.circuitBreaker?.getStatus() || null,
             },
             timestamp: Date.now()
         }));

@@ -18,6 +18,7 @@ import { CryptoSpeedStrategy } from './crypto-speed.js';
 import { SameMarketArb } from './same-market-arb.js';
 import { CombinatorialArb } from './combinatorial-arb.js';
 import { ChainlinkFeed } from './chainlink-feed.js';
+import { insertNearMiss } from './db.js';
 import { AutoRedeemer } from './auto-redeem.js';
 import { OrderManager } from './order-manager.js';
 import { CircuitBreaker } from './circuit-breaker.js';
@@ -713,6 +714,24 @@ class LiveBot {
         this.currentOpportunities.sort((a, b) => b.netProfit - a.netProfit);
         this.lastUpdate = new Date().toISOString();
 
+        // Log near misses — positive gross spread but not profitable after fees
+        if (grossSpread > 0 && !bestArb.isProfitable) {
+            let reason = 'fees_exceed_spread';
+            if (bestArb.netProfit > 0) reason = 'below_min_profit';
+            insertNearMiss({
+                name: mapping.name,
+                polyYes: poly.yes,
+                polyNo: poly.no,
+                kalshiYes: kalshi.yes,
+                kalshiNo: kalshi.no,
+                grossSpread,
+                fees: bestArb.fees,
+                netProfit: bestArb.netProfit,
+                reason,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
         // Paper trade — gate through circuit breaker + execution lock
         this._executeSafeTrade(opp);
 
@@ -748,15 +767,22 @@ class LiveBot {
         }
 
         try {
-            // 3. Execute trade (paper trader handles balance reservation internally)
-            const trade = this.trader.executeTrade(opp);
-            if (trade) {
+            // 3. Execute trade wrapped with OrderManager timeout
+            const tradeId = `xp-${(opp.name || '').replace(/[^a-zA-Z0-9]/g, '-').substring(0, 40)}-${Date.now()}`;
+            const { status, result: trade, elapsedMs } = await this.orderManager.executeWithTimeout(
+                () => this.trader.executeTrade(opp),
+                tradeId
+            );
+
+            if (status === 'timeout') {
+                console.log(`⏰ TRADE TIMEOUT: ${opp.name} after ${elapsedMs}ms`);
+            } else if (trade) {
                 // 4. Record success with circuit breaker
                 this.circuitBreaker.recordSuccess();
 
                 const net = (trade.expectedNetProfit / 100).toFixed(2);
                 const fee = (trade.fees / 100).toFixed(2);
-                console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: $${(trade.totalCost/100).toFixed(2)} | Gross: ${trade.grossSpread.toFixed(1)}¢ | Fees: $${fee} | Net: +$${net}`);
+                console.log(`📈 ENTER ${trade.name} | S${trade.strategy} | Cost: $${(trade.totalCost/100).toFixed(2)} | Gross: ${trade.grossSpread.toFixed(1)}¢ | Fees: $${fee} | Net: +$${net} | Exec: ${elapsedMs}ms`);
                 this.alerts.tradeExecuted(trade).catch(() => {});
                 if (this.dashboard) {
                     this.dashboard.broadcast('trade', trade);
@@ -799,6 +825,12 @@ class LiveBot {
             const net = trade.netPnl >= 0 ? `+$${(trade.netPnl/100).toFixed(2)}` : `-$${Math.abs(trade.netPnl/100).toFixed(2)}`;
             console.log(`📉 STOP-LOSS ${trade.name} | Net: ${net} | Hold: ${Math.round(trade.holdTime/1000)}s`);
             this.alerts.positionRedeemed(trade.name, trade.netPnl).catch(() => {});
+
+            // Record losses with circuit breaker
+            if (trade.netPnl < 0) {
+                this.circuitBreaker.recordLoss(Math.abs(trade.netPnl));
+            }
+
             if (this.dashboard) {
                 this.dashboard.broadcast('trade', trade);
                 this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
@@ -807,6 +839,7 @@ class LiveBot {
 
         if (this.dashboard) {
             this.dashboard.broadcast('opportunities', this.currentOpportunities);
+            this.dashboard.broadcast('circuitBreaker', this.circuitBreaker.getStatus());
         }
 
         // Broadcast Chainlink data alongside other state
@@ -831,6 +864,8 @@ class LiveBot {
     stop() {
         this.alerts.botStopped('shutdown').catch(() => {});
         this.alerts.stop();
+        if (this.autoRedeemer) this.autoRedeemer.stop();
+        if (this.circuitBreaker) this.circuitBreaker.destroy();
         if (this.polyWs) this.polyWs.close();
         if (this.kalshiWs) this.kalshiWs.close();
         if (this.binanceFeed) this.binanceFeed.stop();
