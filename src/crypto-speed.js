@@ -440,8 +440,8 @@ export class CryptoSpeedStrategy extends EventEmitter {
             contracts,
             totalCost,
             grossSpread: edge * contracts,
-            fees: executablePrice * 0.02 * contracts,  // ~2% Polymarket fee
-            expectedNetProfit: (edge - executablePrice * 0.02) * contracts,
+            fees: this.trader.calcPolyFee(executablePrice, { isCrypto15Min: true }) * contracts,
+            expectedNetProfit: (edge - this.trader.calcPolyFee(executablePrice, { isCrypto15Min: true })) * contracts,
             expiresAt: market.endDate,
             entryTime: new Date().toISOString(),
             entryTimestamp: Date.now(),

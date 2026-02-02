@@ -24,11 +24,6 @@ export class PaperTrader {
         this.contractSize = config.contractSize || 10;       // 10 contracts per trade ($)
         this.maxOpenPositions = config.maxOpenPositions || 15;
         
-        // Realistic fee model (cents per contract)
-        this.polyFeePct = config.polyFeePct || 0.02;   // ~2% on Poly (bid-ask spread)
-        this.kalshiFeePct = config.kalshiFeePct || 0.03; // ~3% on Kalshi (exchange fee + spread)
-        this.totalFeeCents = config.totalFeeCents ?? null; // if set, overrides pct-based fees
-        
         // Minimum guaranteed profit after fees to enter (cents per contract)
         this.minNetProfit = config.minNetProfit || 1.0; // At least 1¢/contract profit
         
@@ -37,20 +32,64 @@ export class PaperTrader {
     }
 
     /**
-     * Calculate fees for a given trade
-     * Returns total fee in cents per contract
+     * KALSHI FEE — Formula-based per contract
+     * Source: https://defirate.com/learn/prediction-market-fees/
+     * Formula: ceil(0.07 × contracts × price × (1-price)) for standard markets
+     * Price is in 0-1 range (probability). Fee peaks at 50/50 (~1.75¢/contract).
+     * 
+     * For S&P 500 / Nasdaq-100 markets: multiplier is 0.035 (halved).
+     * We return fee in CENTS per single contract.
      */
-    calcFees(polyPrice, kalshiPrice) {
-        if (this.totalFeeCents !== null) return this.totalFeeCents;
-        
-        // Fee is % of potential profit on each side
-        // Poly: fee on profit if YES wins = (100 - polyPrice) * polyFeePct
-        // Kalshi: fee on profit if NO wins = (100 - kalshiPrice) * kalshiFeePct
-        // Worst case: pay fees on BOTH sides (conservative estimate)
-        const polyFee = (100 - polyPrice) * this.polyFeePct;
-        const kalshiFee = (100 - kalshiPrice) * this.kalshiFeePct;
-        
-        // In reality you only pay fee on the winning side, but be conservative
+    calcKalshiFee(priceCents, opts = {}) {
+        const p = priceCents / 100; // convert cents to probability (0-1)
+        const multiplier = opts.isIndex ? 0.035 : 0.07;
+        // Per-contract fee: multiplier * p * (1-p) gives DOLLARS
+        // Convert to cents (our internal unit)
+        // Note: ceil() applies to total order, not per-contract. We return raw per-contract.
+        const feeDollarsPerContract = multiplier * p * (1 - p);
+        return feeDollarsPerContract * 100; // cents per contract
+    }
+
+    /**
+     * POLYMARKET FEE — Depends on market type
+     * 
+     * 1. Long-term / political / event markets: 0% trading fee
+     *    (This covers ALL cross-platform arb markets)
+     * 
+     * 2. 15-minute crypto up/down markets (taker fee):
+     *    Formula: shares × price × 0.25 × (price × (1-price))²
+     *    Max effective rate: ~1.56% at 50/50 odds
+     *    Drops to near-zero at extreme odds
+     * 
+     * 3. Polymarket US (regulated): 0.10% taker fee (10 bps)
+     *    We don't use this — we're on global Polymarket via proxy
+     * 
+     * Returns fee in CENTS per single contract.
+     */
+    calcPolyFee(priceCents, opts = {}) {
+        if (opts.isCrypto15Min) {
+            // 15-minute crypto market taker fee
+            const p = priceCents / 100;
+            // Formula from Polymarket docs: shares * price * 0.25 * (price * (1-price))^2
+            // For 1 share at the given price:
+            const feePerShare = p * 0.25 * Math.pow(p * (1 - p), 2);
+            return feePerShare * 100; // convert to cents
+        }
+        // Long-term / political / event markets = FREE
+        return 0;
+    }
+
+    /**
+     * Calculate total fees for a cross-platform arb trade
+     * Returns total fee in cents per contract
+     * 
+     * @param {number} polyPrice - Poly side price in cents (0-100)
+     * @param {number} kalshiPrice - Kalshi side price in cents (0-100)
+     * @param {object} opts - { isCrypto15Min, isIndex }
+     */
+    calcFees(polyPrice, kalshiPrice, opts = {}) {
+        const polyFee = this.calcPolyFee(polyPrice, opts);
+        const kalshiFee = this.calcKalshiFee(kalshiPrice, opts);
         return polyFee + kalshiFee;
     }
 
@@ -58,11 +97,15 @@ export class PaperTrader {
      * Calculate guaranteed profit per contract if held to resolution
      * This is the core arb math:
      *   profit = 100¢ (guaranteed payout) - totalCost - fees
+     * 
+     * @param {number} polyPrice - cents
+     * @param {number} kalshiPrice - cents
+     * @param {object} opts - { isCrypto15Min, isIndex }
      */
-    calcResolutionProfit(polyPrice, kalshiPrice) {
+    calcResolutionProfit(polyPrice, kalshiPrice, opts = {}) {
         const totalCost = polyPrice + kalshiPrice;
         const grossSpread = 100 - totalCost;
-        const fees = this.calcFees(polyPrice, kalshiPrice);
+        const fees = this.calcFees(polyPrice, kalshiPrice, opts);
         const netProfit = grossSpread - fees;
         
         return {
@@ -70,7 +113,11 @@ export class PaperTrader {
             grossSpread,
             fees,
             netProfit,
-            isProfitable: netProfit >= this.minNetProfit
+            isProfitable: netProfit >= this.minNetProfit,
+            feeBreakdown: {
+                poly: this.calcPolyFee(polyPrice, opts),
+                kalshi: this.calcKalshiFee(kalshiPrice, opts),
+            }
         };
     }
 

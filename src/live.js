@@ -37,8 +37,9 @@ class LiveBot {
         this.trader = new PaperTrader({
             initialBalance: 500,        // $500 per side
             contractSize: 10,           // $10 per trade (10 contracts × $1 each)
-            polyFeePct: 0.02,           // ~2% Polymarket spread cost
-            kalshiFeePct: 0.03,         // ~3% Kalshi fee + spread
+            // Fees now use real platform formulas:
+            // - Polymarket: 0% on event/political markets, variable on 15-min crypto
+            // - Kalshi: ceil(0.07 × price × (1-price)) per contract
             minNetProfit: 1.0,          // Only trade if ≥1¢/contract after fees
             maxOpenPositions: 20,
         });
