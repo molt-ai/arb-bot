@@ -2,409 +2,768 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Arb Bot — Live Dashboard</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0a0a0f">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, system-ui, 'SF Pro', sans-serif; background: #0a0a0f; color: #e0e0e8; }
-        
-        .header { 
-            background: linear-gradient(135deg, #12121a 0%, #1a1a2e 100%);
-            padding: 16px 24px; border-bottom: 1px solid #2a2a3a;
-            display: flex; justify-content: space-between; align-items: center;
+        /* ===== RESET & BASE ===== */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+        body {
+            font-family: -apple-system, system-ui, 'SF Pro', 'Segoe UI', sans-serif;
+            background: #0a0a0f; color: #e0e0e8;
+            overflow-x: hidden; min-height: 100vh;
+            -webkit-overflow-scrolling: touch;
         }
-        .header h1 { font-size: 1.2rem; color: #7c8aff; }
-        .header .controls { display: flex; gap: 8px; align-items: center; }
-        .status { font-size: 0.75rem; }
-        .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+
+        /* ===== REFRESH INDICATOR ===== */
+        .refresh-bar {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            height: 3px; background: transparent; pointer-events: none;
+        }
+        .refresh-bar.active {
+            background: linear-gradient(90deg, #7c8aff, #4ade80, #7c8aff);
+            background-size: 200% 100%;
+            animation: shimmer 1.2s ease-in-out infinite;
+        }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+        .refresh-toast {
+            position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+            background: #1a1a2e; color: #7c8aff; padding: 6px 16px;
+            border-radius: 20px; font-size: 0.75rem; z-index: 101;
+            border: 1px solid #2a2a3a; opacity: 0; transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .refresh-toast.visible { opacity: 1; }
+
+        /* ===== HEADER ===== */
+        .header {
+            background: linear-gradient(135deg, #12121a 0%, #1a1a2e 100%);
+            padding: 12px 16px; border-bottom: 1px solid #2a2a3a;
+            position: sticky; top: 0; z-index: 50;
+        }
+        .header-top {
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 8px;
+        }
+        .header h1 { font-size: 1rem; color: #7c8aff; white-space: nowrap; }
+        .header-controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .status-dots {
+            display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+            font-size: 0.72rem;
+        }
+        .status-dot {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 4px 8px; background: #0d0d14; border-radius: 12px;
+        }
+        .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
         .dot.green { background: #4ade80; }
         .dot.red { background: #f87171; }
         .dot.yellow { background: #facc15; }
-        
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; max-width: 1400px; margin: 0 auto; padding-bottom: 60px; }
-        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
-        
-        .card {
-            background: #12121a; border: 1px solid #2a2a3a; border-radius: 10px;
-            padding: 16px; overflow: hidden;
+        .dot.blue { background: #60a5fa; }
+
+        /* ===== BUTTONS ===== */
+        button, .btn {
+            background: #2a2a3a; color: #8888aa; border: 1px solid #3a3a4a;
+            padding: 8px 14px; border-radius: 8px; cursor: pointer;
+            font-size: 0.78rem; min-height: 44px; min-width: 44px;
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: 4px; transition: all 0.2s; -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
-        .card.full { grid-column: 1 / -1; }
-        .card h2 { font-size: 0.85rem; color: #8888aa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-        
-        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
-        .stat { text-align: center; padding: 8px; background: #0d0d14; border-radius: 8px; }
-        .stat .value { font-size: 1.4rem; font-weight: 700; color: #fff; }
-        .stat .value.green { color: #4ade80; }
-        .stat .value.red { color: #f87171; }
-        .stat .value.yellow { color: #facc15; }
-        .stat .label { font-size: 0.7rem; color: #6b6b88; margin-top: 2px; }
-        
-        .scrollable { max-height: 380px; overflow-y: auto; }
-        
-        /* Opportunities */
-        .opp-row {
-            display: grid; grid-template-columns: 2fr 80px 80px 80px 70px;
-            padding: 8px 0; border-bottom: 1px solid #1a1a2a; align-items: center;
-            font-size: 0.8rem;
+        button:active, .btn:active { background: #4a4a5a; color: #fff; transform: scale(0.97); }
+
+        /* ===== PAUSED OVERLAY ===== */
+        .paused-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(10, 10, 15, 0.85); z-index: 200;
+            flex-direction: column; align-items: center; justify-content: center; gap: 16px;
         }
-        .opp-row.header { color: #6b6b88; font-size: 0.7rem; text-transform: uppercase; border-bottom: 1px solid #2a2a3a; }
-        .opp-name { color: #c8c8e0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .spread { font-weight: 700; }
-        .spread.positive { color: #4ade80; }
-        .spread.negative { color: #f87171; }
-        .spread.neutral { color: #facc15; }
-        .source-tag { font-size: 0.6rem; color: #555; }
+        .paused-overlay.visible { display: flex; }
+        .paused-overlay p { color: #6b6b88; font-size: 0.9rem; }
+        .paused-overlay button { font-size: 1rem; padding: 14px 32px; background: #7c8aff; color: #fff; border: none; }
+
+        /* ===== MAIN CONTENT ===== */
+        .content { padding: 12px; padding-bottom: 64px; max-width: 1200px; margin: 0 auto; }
+
+        /* ===== SECTION ===== */
+        .section { margin-bottom: 12px; }
+        .section-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 14px; background: #12121a; border: 1px solid #2a2a3a;
+            border-radius: 10px 10px 0 0; cursor: pointer;
+            -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+            min-height: 44px; user-select: none;
+        }
+        .section.collapsed .section-header { border-radius: 10px; }
+        .section-header h2 {
+            font-size: 0.82rem; color: #8888aa; text-transform: uppercase;
+            letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;
+        }
+        .section-toggle {
+            font-size: 0.7rem; color: #555; transition: transform 0.2s;
+        }
+        .section.collapsed .section-toggle { transform: rotate(-90deg); }
+        .section-body {
+            background: #12121a; border: 1px solid #2a2a3a; border-top: none;
+            border-radius: 0 0 10px 10px; padding: 14px;
+            overflow: hidden; transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
+            max-height: 2000px; opacity: 1;
+        }
+        .section.collapsed .section-body {
+            max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0;
+            border: none;
+        }
+
+        /* ===== STATS GRID ===== */
+        .stats-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .stat-card {
+            text-align: center; padding: 10px 6px; background: #0d0d14;
+            border-radius: 8px; transition: background 0.3s;
+        }
+        .stat-card .val {
+            font-size: 1.3rem; font-weight: 700; color: #fff;
+            transition: color 0.3s;
+        }
+        .stat-card .val.green { color: #4ade80; }
+        .stat-card .val.red { color: #f87171; }
+        .stat-card .val.yellow { color: #facc15; }
+        .stat-card .lbl { font-size: 0.68rem; color: #6b6b88; margin-top: 2px; }
+        .fee-note { font-size: 0.68rem; color: #444; margin-top: 10px; font-style: italic; line-height: 1.4; }
+
+        /* ===== CRYPTO PRICE CARDS ===== */
+        .crypto-grid {
+            display: grid; grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+        }
+        .crypto-card {
+            text-align: center; padding: 14px 8px; background: #0d0d14;
+            border-radius: 10px; border: 1px solid #1a1a2a;
+        }
+        .crypto-card .ticker { font-size: 0.7rem; color: #6b6b88; font-weight: 600; text-transform: uppercase; }
+        .crypto-card .price { font-size: 1.2rem; font-weight: 700; color: #fff; margin: 4px 0; }
+        .crypto-card .momentum { font-size: 0.78rem; font-weight: 600; }
+        .crypto-card .momentum.green { color: #4ade80; }
+        .crypto-card .momentum.red { color: #f87171; }
+        .crypto-card .momentum.yellow { color: #facc15; }
+        .crypto-meta { display: flex; gap: 8px; margin-top: 8px; }
+        .crypto-meta .stat-card { flex: 1; }
+
+        /* ===== CHAINLINK CARD ===== */
+        .chainlink-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .chainlink-card {
+            text-align: center; padding: 12px 8px; background: #0d0d14;
+            border-radius: 8px;
+        }
+        .chainlink-card .val { font-size: 1.1rem; font-weight: 700; color: #fff; }
+        .chainlink-card .lbl { font-size: 0.68rem; color: #6b6b88; margin-top: 2px; }
+        .div-green { color: #4ade80 !important; }
+        .div-yellow { color: #facc15 !important; }
+        .div-red { color: #f87171 !important; }
+
+        /* ===== ITEM CARDS (opps, positions, trades) ===== */
+        .item-cards { display: flex; flex-direction: column; gap: 8px; }
+        .item-card {
+            background: #0d0d14; border-radius: 8px; padding: 12px;
+            border: 1px solid #1a1a2a; transition: border-color 0.2s;
+        }
+        .item-card-name {
+            font-size: 0.85rem; font-weight: 500; color: #c8c8e0;
+            margin-bottom: 8px; line-height: 1.3;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .item-card-row {
+            display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+        }
+        .item-chip {
+            font-size: 0.72rem; padding: 3px 8px; border-radius: 4px;
+            background: #1a1a2a; color: #8888aa; white-space: nowrap;
+        }
+        .item-chip.green { background: #1a3a2a; color: #4ade80; }
+        .item-chip.red { background: #2a1a1a; color: #f87171; }
+        .item-chip.yellow { background: #2a2a1a; color: #facc15; }
+        .item-chip.blue { background: #1a1a3a; color: #60a5fa; }
+        .item-chip.purple { background: #2a1a3a; color: #a78bfa; }
+        .item-chip.orange { background: #2a1e1a; color: #f97316; }
+
+        /* Badge for signal */
         .badge {
-            font-size: 0.65rem; padding: 2px 6px; border-radius: 4px;
-            text-align: center; font-weight: 600; display: inline-block;
+            font-size: 0.68rem; padding: 3px 8px; border-radius: 4px;
+            font-weight: 700; display: inline-flex; align-items: center; gap: 3px;
         }
         .badge.arb { background: #1a3a2a; color: #4ade80; }
         .badge.watch { background: #2a2a1a; color: #facc15; }
-        .badge.no { background: #2a1a1a; color: #f87171; }
-        
-        /* Trade Log */
-        .trade-row {
-            display: grid; grid-template-columns: 65px 70px 2fr 90px 90px 80px;
-            padding: 7px 0; border-bottom: 1px solid #1a1a2a;
-            font-size: 0.78rem; align-items: center;
+        .badge.no { background: #1a1a1a; color: #555; }
+
+        /* ===== EMPTY STATE ===== */
+        .empty-state {
+            padding: 24px 16px; text-align: center; color: #6b6b88;
+            font-size: 0.82rem;
         }
-        .trade-row.header { color: #6b6b88; font-size: 0.7rem; text-transform: uppercase; }
-        .trade-time { color: #555; font-size: 0.72rem; font-family: monospace; }
-        .trade-type { font-weight: 700; font-size: 0.72rem; }
-        .trade-type.entry { color: #60a5fa; }
-        .trade-type.resolve { color: #a78bfa; }
-        .trade-type.exit { color: #f97316; }
-        .pnl.positive { color: #4ade80; font-weight: 600; }
-        .pnl.negative { color: #f87171; font-weight: 600; }
-        
-        /* Positions */
-        .pos-row {
-            display: grid; grid-template-columns: 2fr 1fr 80px 80px 80px;
-            padding: 7px 0; border-bottom: 1px solid #1a1a2a;
-            font-size: 0.8rem; align-items: center;
-        }
-        .pos-row.header { color: #6b6b88; font-size: 0.7rem; text-transform: uppercase; }
-        
+
+        /* ===== SCROLLABLE LIMIT ===== */
+        .item-cards.limited { max-height: 500px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+        /* ===== BOTTOM BAR ===== */
         .bottom-bar {
             position: fixed; bottom: 0; left: 0; right: 0;
             background: #12121a; border-top: 1px solid #2a2a3a;
-            padding: 8px 24px; display: flex; justify-content: space-between;
-            font-size: 0.72rem; color: #6b6b88;
+            padding: 10px 16px; display: flex; justify-content: space-between;
+            font-size: 0.7rem; color: #6b6b88; z-index: 50;
+            align-items: center;
         }
-        
-        button {
-            background: #2a2a3a; color: #8888aa; border: 1px solid #3a3a4a;
-            padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem;
-        }
-        button:hover { background: #3a3a4a; color: #fff; }
 
-        .fee-note { font-size: 0.7rem; color: #555; margin-top: 6px; font-style: italic; }
+        /* ===== DESKTOP OVERRIDES (>768px) ===== */
+        @media (min-width: 769px) {
+            .content { padding: 16px; }
+            .header { padding: 14px 24px; }
+            .header h1 { font-size: 1.15rem; }
+
+            .stats-grid { grid-template-columns: repeat(5, 1fr); }
+
+            .two-col-grid {
+                display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+            }
+
+            /* Desktop: compact table rows for opportunities */
+            .opp-table-header {
+                display: grid !important; grid-template-columns: 2.5fr 65px 65px 65px 70px 60px;
+                padding: 6px 12px; color: #6b6b88; font-size: 0.7rem;
+                text-transform: uppercase; border-bottom: 1px solid #2a2a3a;
+            }
+            .opp-table-row {
+                display: grid !important; grid-template-columns: 2.5fr 65px 65px 65px 70px 60px;
+                padding: 7px 12px; border-bottom: 1px solid #0d0d14;
+                font-size: 0.78rem; align-items: center;
+            }
+            .opp-table-row .opp-name-cell {
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                color: #c8c8e0;
+            }
+
+            /* Desktop: compact table for positions */
+            .pos-table-header {
+                display: grid !important; grid-template-columns: 2.5fr 80px 75px 80px 100px;
+                padding: 6px 12px; color: #6b6b88; font-size: 0.7rem;
+                text-transform: uppercase; border-bottom: 1px solid #2a2a3a;
+            }
+            .pos-table-row {
+                display: grid !important; grid-template-columns: 2.5fr 80px 75px 80px 100px;
+                padding: 7px 12px; border-bottom: 1px solid #0d0d14;
+                font-size: 0.78rem; align-items: center;
+            }
+
+            /* Desktop: compact table for trades */
+            .trade-table-header {
+                display: grid !important; grid-template-columns: 70px 65px 2.5fr 85px 85px 80px;
+                padding: 6px 12px; color: #6b6b88; font-size: 0.7rem;
+                text-transform: uppercase; border-bottom: 1px solid #2a2a3a;
+            }
+            .trade-table-row {
+                display: grid !important; grid-template-columns: 70px 65px 2.5fr 85px 85px 80px;
+                padding: 7px 12px; border-bottom: 1px solid #0d0d14;
+                font-size: 0.78rem; align-items: center;
+            }
+
+            /* Hide mobile-only elements */
+            .mobile-only { display: none !important; }
+        }
+
+        /* Mobile: hide desktop table headers and rows */
+        @media (max-width: 768px) {
+            .desktop-only { display: none !important; }
+            .crypto-card .price { font-size: 1rem; }
+        }
     </style>
 </head>
 <body>
+    <!-- Refresh indicator -->
+    <div class="refresh-bar" id="refresh-bar"></div>
+    <div class="refresh-toast" id="refresh-toast">↻ Refreshing…</div>
+
+    <!-- Paused overlay -->
+    <div class="paused-overlay" id="paused-overlay">
+        <p>⏸ Auto-refresh paused (tab idle)</p>
+        <button onclick="resumeRefresh()">↻ Tap to Refresh</button>
+    </div>
+
+    <!-- Header -->
     <div class="header">
-        <h1>🎯 Arb Bot v2 — Multi-Strategy Dashboard</h1>
-        <div class="controls">
-            <div class="status">
-                <span id="poly-status"><span class="dot green"></span>Poly</span>
-                <span style="margin-left:6px;" id="kalshi-status"><span class="dot green"></span>Kalshi</span>
-                <span style="margin-left:6px;" id="binance-status"><span class="dot yellow"></span>Coinbase</span>
-            </div>
-            <button onclick="resetPortfolio()" style="margin-left: 12px;">Reset</button>
-        </div>
-    </div>
-
-    <div class="grid">
-        <div class="card full">
-            <h2>📊 Portfolio — $500 per side</h2>
-            <div class="stats">
-                <div class="stat">
-                    <div class="value" id="total-value">$1,000</div>
-                    <div class="label">Total Value</div>
+        <div class="header-top">
+            <h1>🎯 Arb Bot v2</h1>
+            <div class="header-controls">
+                <div class="status-dots">
+                    <span class="status-dot" id="poly-status"><span class="dot green"></span> Poly</span>
+                    <span class="status-dot" id="kalshi-status"><span class="dot green"></span> Kalshi</span>
+                    <span class="status-dot" id="coinbase-status"><span class="dot yellow"></span> Coinbase</span>
+                    <span class="status-dot" id="chainlink-status"><span class="dot yellow"></span> CL</span>
                 </div>
-                <div class="stat">
-                    <div class="value green" id="net-pnl">$0.00</div>
-                    <div class="label">Net P&L (after fees)</div>
-                </div>
-                <div class="stat">
-                    <div class="value yellow" id="gross-pnl">$0.00</div>
-                    <div class="label">Gross P&L</div>
-                </div>
-                <div class="stat">
-                    <div class="value red" id="fees-paid">$0.00</div>
-                    <div class="label">Fees Paid</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="total-trades">0</div>
-                    <div class="label">Trades</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="win-rate">0%</div>
-                    <div class="label">Win Rate</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="open-positions">0</div>
-                    <div class="label">Open Positions</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="expected-profit">$0.00</div>
-                    <div class="label">Expected (if held)</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="poly-balance">$500</div>
-                    <div class="label">Poly Balance</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="kalshi-balance">$500</div>
-                    <div class="label">Kalshi Balance</div>
-                </div>
-            </div>
-            <div class="fee-note">3 strategies: Cross-Platform Arb (Poly↔Kalshi) • Crypto Speed (Coinbase→Poly 15min) • Same-Market Rebalancing (YES+NO&lt;$1)</div>
-        </div>
-
-        <div class="card full">
-            <h2>⚡ Crypto Speed — Real-Time Exchange Prices</h2>
-            <div class="stats" id="crypto-prices">
-                <div class="stat">
-                    <div class="value" id="btc-price">—</div>
-                    <div class="label">BTC</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="btc-momentum">—</div>
-                    <div class="label">BTC 2m Momentum</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="eth-price">—</div>
-                    <div class="label">ETH</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="eth-momentum">—</div>
-                    <div class="label">ETH 2m Momentum</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="sol-price">—</div>
-                    <div class="label">SOL</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="sol-momentum">—</div>
-                    <div class="label">SOL 2m Momentum</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="cs-markets">0</div>
-                    <div class="label">15m Markets</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="cs-signals">0</div>
-                    <div class="label">Signals Fired</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2>🔥 Cross-Platform Opportunities</h2>
-            <div class="scrollable">
-                <div class="opp-row header" style="grid-template-columns: 2fr 60px 60px 60px 70px 55px;">
-                    <span>Market</span>
-                    <span>Gross</span>
-                    <span>Fees</span>
-                    <span>Net</span>
-                    <span>Resolves</span>
-                    <span>Signal</span>
-                </div>
-                <div id="opportunities">
-                    <div style="padding: 20px; text-align: center; color: #6b6b88;">Scanning markets...</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2>📂 Open Positions (Hold to Resolution)</h2>
-            <div class="scrollable">
-                <div class="pos-row header" style="grid-template-columns: 2fr 80px 70px 70px 100px;">
-                    <span>Market</span>
-                    <span>Sides</span>
-                    <span>Cost</span>
-                    <span>Net Profit</span>
-                    <span>Pays Out</span>
-                </div>
-                <div id="positions">
-                    <div style="padding: 20px; text-align: center; color: #6b6b88;">No positions — waiting for profitable spreads</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card full">
-            <h2>📋 Trade History</h2>
-            <div class="scrollable">
-                <div class="trade-row header">
-                    <span>Time</span>
-                    <span>Type</span>
-                    <span>Market</span>
-                    <span>Cost</span>
-                    <span>Fees</span>
-                    <span>Net P&L</span>
-                </div>
-                <div id="trades">
-                    <div style="padding: 20px; text-align: center; color: #6b6b88;">No trades yet — bot only enters when profitable after fees</div>
-                </div>
+                <button onclick="manualRefresh()">↻</button>
+                <button onclick="resetPortfolio()">Reset</button>
             </div>
         </div>
     </div>
 
+    <div class="content">
+        <!-- Portfolio Stats -->
+        <div class="section" id="sec-portfolio">
+            <div class="section-header" onclick="toggleSection('sec-portfolio')">
+                <h2>📊 Portfolio — $500 per side</h2>
+                <span class="section-toggle">▼</span>
+            </div>
+            <div class="section-body">
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="val green" id="net-pnl">$0.00</div><div class="lbl">Net P&L</div></div>
+                    <div class="stat-card"><div class="val" id="total-trades">0</div><div class="lbl">Total Trades</div></div>
+                    <div class="stat-card"><div class="val" id="win-rate">0%</div><div class="lbl">Win Rate</div></div>
+                    <div class="stat-card"><div class="val" id="open-positions">0</div><div class="lbl">Open Positions</div></div>
+                    <div class="stat-card"><div class="val" id="expected-profit">$0.00</div><div class="lbl">Expected Profit</div></div>
+                    <div class="stat-card"><div class="val" id="total-value">$1,000</div><div class="lbl">Total Value</div></div>
+                    <div class="stat-card"><div class="val yellow" id="gross-pnl">$0.00</div><div class="lbl">Gross P&L</div></div>
+                    <div class="stat-card"><div class="val red" id="fees-paid">$0.00</div><div class="lbl">Fees Paid</div></div>
+                    <div class="stat-card"><div class="val" id="poly-balance">$500</div><div class="lbl">Poly Bal</div></div>
+                    <div class="stat-card"><div class="val" id="kalshi-balance">$500</div><div class="lbl">Kalshi Bal</div></div>
+                </div>
+                <div class="fee-note">3 strategies: Cross-Platform Arb (Poly↔Kalshi) · Crypto Speed (Coinbase→Poly 15min) · Same-Market Rebalancing (YES+NO&lt;$1)</div>
+            </div>
+        </div>
+
+        <!-- Crypto Prices -->
+        <div class="section" id="sec-crypto">
+            <div class="section-header" onclick="toggleSection('sec-crypto')">
+                <h2>⚡ Crypto Speed</h2>
+                <span class="section-toggle">▼</span>
+            </div>
+            <div class="section-body">
+                <div class="crypto-grid">
+                    <div class="crypto-card">
+                        <div class="ticker">BTC</div>
+                        <div class="price" id="btc-price">—</div>
+                        <div class="momentum" id="btc-momentum">—</div>
+                    </div>
+                    <div class="crypto-card">
+                        <div class="ticker">ETH</div>
+                        <div class="price" id="eth-price">—</div>
+                        <div class="momentum" id="eth-momentum">—</div>
+                    </div>
+                    <div class="crypto-card">
+                        <div class="ticker">SOL</div>
+                        <div class="price" id="sol-price">—</div>
+                        <div class="momentum" id="sol-momentum">—</div>
+                    </div>
+                </div>
+                <div class="crypto-meta">
+                    <div class="stat-card"><div class="val" id="cs-markets">0</div><div class="lbl">15m Markets</div></div>
+                    <div class="stat-card"><div class="val" id="cs-signals">0</div><div class="lbl">Signals</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chainlink -->
+        <div class="section" id="sec-chainlink">
+            <div class="section-header" onclick="toggleSection('sec-chainlink')">
+                <h2>🔗 Chainlink Oracle</h2>
+                <span class="section-toggle">▼</span>
+            </div>
+            <div class="section-body">
+                <div class="chainlink-grid" id="chainlink-data">
+                    <div class="chainlink-card">
+                        <div class="val" id="cl-btc-price">—</div>
+                        <div class="lbl">CL BTC Price</div>
+                    </div>
+                    <div class="chainlink-card">
+                        <div class="val" id="cl-exchange-price">—</div>
+                        <div class="lbl">Exchange Price</div>
+                    </div>
+                    <div class="chainlink-card">
+                        <div class="val" id="cl-divergence">—</div>
+                        <div class="lbl">Divergence</div>
+                    </div>
+                    <div class="chainlink-card">
+                        <div class="val" id="cl-status">—</div>
+                        <div class="lbl">Status</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Opportunities & Positions side by side on desktop -->
+        <div class="two-col-grid">
+            <!-- Opportunities -->
+            <div class="section" id="sec-opps">
+                <div class="section-header" onclick="toggleSection('sec-opps')">
+                    <h2>🔥 Opportunities</h2>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-body">
+                    <!-- Desktop table header -->
+                    <div class="opp-table-header desktop-only">
+                        <span>Market</span><span>Gross</span><span>Fees</span><span>Net</span><span>Time</span><span>Signal</span>
+                    </div>
+                    <div id="opportunities" class="item-cards limited">
+                        <div class="empty-state">Scanning markets…</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Positions -->
+            <div class="section" id="sec-positions">
+                <div class="section-header" onclick="toggleSection('sec-positions')">
+                    <h2>📂 Open Positions</h2>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-body">
+                    <!-- Desktop table header -->
+                    <div class="pos-table-header desktop-only">
+                        <span>Market</span><span>Sides</span><span>Cost</span><span>Profit</span><span>Expires</span>
+                    </div>
+                    <div id="positions" class="item-cards limited">
+                        <div class="empty-state">No positions — waiting for profitable spreads</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trade History -->
+        <div class="section" id="sec-trades">
+            <div class="section-header" onclick="toggleSection('sec-trades')">
+                <h2>📋 Trade History</h2>
+                <span class="section-toggle">▼</span>
+            </div>
+            <div class="section-body">
+                <!-- Desktop table header -->
+                <div class="trade-table-header desktop-only">
+                    <span>Time</span><span>Type</span><span>Market</span><span>Cost</span><span>Fees</span><span>P&L</span>
+                </div>
+                <div id="trades" class="item-cards limited">
+                    <div class="empty-state">No trades yet — bot only enters when profitable after fees</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Bar -->
     <div class="bottom-bar">
-        <span>Paper Trading — Resolution Arb Strategy — Fees Included</span>
-        <span id="last-update">Last update: —</span>
+        <span>Paper Trading · Resolution Arb</span>
+        <span id="last-update">Updated: —</span>
     </div>
 
     <script>
-        let ws;
+    (function() {
+        'use strict';
 
-        function connect() {
-            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${proto}//${location.host}`);
-            ws.onopen = () => {};
-            ws.onclose = () => setTimeout(connect, 3000);
-            ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
+        // ===== STATE =====
+        let pollTimer = null;
+        let paused = false;
+        let lastActivity = Date.now();
+        const POLL_MS = 5000;
+        const IDLE_MS = 30000;
+        const isDesktop = () => window.innerWidth > 768;
+
+        // ===== SECTION COLLAPSE =====
+        const collapsed = JSON.parse(localStorage.getItem('arb-collapsed') || '{}');
+
+        function toggleSection(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.toggle('collapsed');
+            collapsed[id] = el.classList.contains('collapsed');
+            localStorage.setItem('arb-collapsed', JSON.stringify(collapsed));
+        }
+        window.toggleSection = toggleSection;
+
+        // Restore collapsed state
+        Object.entries(collapsed).forEach(([id, val]) => {
+            if (val) { const el = document.getElementById(id); if (el) el.classList.add('collapsed'); }
+        });
+
+        // ===== VISIBILITY / IDLE =====
+        function markActive() { lastActivity = Date.now(); }
+        document.addEventListener('touchstart', markActive, { passive: true });
+        document.addEventListener('click', markActive);
+        document.addEventListener('scroll', markActive, { passive: true });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                markActive();
+                if (paused) return; // user must tap to resume
+                startPolling();
+                fetchAll(); // immediate refresh on return
+            }
+        });
+
+        function checkIdle() {
+            if (Date.now() - lastActivity > IDLE_MS && !document.hidden) {
+                paused = true;
+                stopPolling();
+                document.getElementById('paused-overlay').classList.add('visible');
+            }
         }
 
-        function handleMessage(msg) {
-            document.getElementById('last-update').textContent = 'Last update: ' + new Date(msg.timestamp).toLocaleTimeString();
-            if (msg.type === 'init' || msg.type === 'portfolio') updatePortfolio(msg.data.portfolio || msg.data);
-            if (msg.type === 'init' || msg.type === 'opportunities') updateOpportunities(msg.data.opportunities || msg.data);
-            if (msg.type === 'trade') fetch('/api/portfolio').then(r => r.json()).then(updatePortfolio);
+        function resumeRefresh() {
+            paused = false;
+            markActive();
+            document.getElementById('paused-overlay').classList.remove('visible');
+            startPolling();
+            fetchAll();
+        }
+        window.resumeRefresh = resumeRefresh;
+
+        // ===== POLLING =====
+        function startPolling() {
+            stopPolling();
+            pollTimer = setInterval(() => {
+                checkIdle();
+                if (!paused) fetchAll();
+            }, POLL_MS);
         }
 
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        function showRefresh(show) {
+            document.getElementById('refresh-bar').classList.toggle('active', show);
+            document.getElementById('refresh-toast').classList.toggle('visible', show);
+        }
+
+        async function fetchAll() {
+            showRefresh(true);
+            try {
+                const [portfolio, opps, crypto, chainlink] = await Promise.all([
+                    safeFetch('/api/portfolio'),
+                    safeFetch('/api/opportunities'),
+                    safeFetch('/api/crypto-speed'),
+                    safeFetch('/api/chainlink')
+                ]);
+                if (portfolio) updatePortfolio(portfolio);
+                if (opps) updateOpportunities(opps.opportunities || opps);
+                if (crypto) updateCryptoSpeed(crypto);
+                if (chainlink) updateChainlink(chainlink);
+                document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+            } catch (e) {
+                // silently skip
+            }
+            setTimeout(() => showRefresh(false), 400);
+        }
+
+        async function safeFetch(url) {
+            try {
+                const r = await fetch(url);
+                if (!r.ok) return null;
+                return await r.json();
+            } catch { return null; }
+        }
+
+        function manualRefresh() {
+            markActive();
+            if (paused) resumeRefresh();
+            else fetchAll();
+        }
+        window.manualRefresh = manualRefresh;
+
+        // ===== HELPERS =====
+        function fmtPnl(val) {
+            const n = parseFloat(val) || 0;
+            return (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2);
+        }
+        function pnlClass(val) {
+            const n = parseFloat(val) || 0;
+            return n >= 0 ? 'green' : 'red';
+        }
+        function timeLeft(expiresAt) {
+            if (!expiresAt) return '—';
+            const diff = new Date(expiresAt) - new Date();
+            if (diff < 0) return 'Expired';
+            if (diff < 3600000) return Math.ceil(diff / 60000) + 'm';
+            if (diff < 86400000) return Math.ceil(diff / 3600000) + 'h';
+            const d = Math.ceil(diff / 86400000);
+            return d + 'd';
+        }
+        function esc(s) {
+            const d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+
+        // ===== UPDATE: PORTFOLIO =====
         function updatePortfolio(p) {
             if (!p) return;
-            document.getElementById('total-value').textContent = '$' + p.totalValue;
-            
-            const netPnl = parseFloat(p.netPnL);
-            const netEl = document.getElementById('net-pnl');
-            netEl.textContent = (netPnl >= 0 ? '+$' : '-$') + Math.abs(netPnl).toFixed(2);
-            netEl.className = 'value ' + (netPnl >= 0 ? 'green' : 'red');
+            const set = (id, text, cls) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.textContent = text;
+                if (cls !== undefined) el.className = 'val ' + cls;
+            };
 
-            const grossPnl = parseFloat(p.grossPnL);
-            const grossEl = document.getElementById('gross-pnl');
-            grossEl.textContent = (grossPnl >= 0 ? '+$' : '-$') + Math.abs(grossPnl).toFixed(2);
-            grossEl.className = 'value ' + (grossPnl >= 0 ? 'green' : 'red');
+            set('net-pnl', fmtPnl(p.netPnL), pnlClass(p.netPnL));
+            set('total-trades', p.totalTrades);
+            set('win-rate', p.winRate + '%');
+            set('open-positions', p.openPositions);
+            set('expected-profit', '+$' + (parseFloat(p.expectedProfit) || 0).toFixed(2));
+            set('total-value', '$' + p.totalValue);
+            set('gross-pnl', fmtPnl(p.grossPnL), pnlClass(p.grossPnL));
+            set('fees-paid', '$' + p.totalFeesPaid, 'red');
+            set('poly-balance', '$' + p.polyBalance);
+            set('kalshi-balance', '$' + p.kalshiBalance);
 
-            document.getElementById('fees-paid').textContent = '$' + p.totalFeesPaid;
-            document.getElementById('total-trades').textContent = p.totalTrades;
-            document.getElementById('win-rate').textContent = p.winRate + '%';
-            document.getElementById('open-positions').textContent = p.openPositions;
-            document.getElementById('expected-profit').textContent = '+$' + (isNaN(parseFloat(p.expectedProfit)) ? '0.00' : p.expectedProfit);
-            document.getElementById('poly-balance').textContent = '$' + p.polyBalance;
-            document.getElementById('kalshi-balance').textContent = '$' + p.kalshiBalance;
-
-            // Positions
-            const posEl = document.getElementById('positions');
-            if (p.positions?.length > 0) {
-                posEl.innerHTML = p.positions.map(pos => {
-                    let payoutStr = '—';
-                    if (pos.expiresAt) {
-                        const exp = new Date(pos.expiresAt);
-                        const now = new Date();
-                        const diffMs = exp - now;
-                        if (diffMs < 0) {
-                            payoutStr = 'Expired';
-                        } else if (diffMs < 3600000) {
-                            payoutStr = Math.ceil(diffMs/60000) + 'm left';
-                        } else if (diffMs < 86400000) {
-                            payoutStr = Math.ceil(diffMs/3600000) + 'h left';
-                        } else {
-                            const days = Math.ceil(diffMs/86400000);
-                            payoutStr = days + 'd — ' + exp.toLocaleDateString('en-US', {month:'short', day:'numeric'});
-                        }
-                    }
-                    return `<div class="pos-row" style="grid-template-columns: 2fr 80px 70px 70px 100px;">
-                        <span class="opp-name">${pos.name}</span>
-                        <span>P:${pos.polySide} K:${pos.kalshiSide}</span>
-                        <span>$${((pos.totalCost||0)/100).toFixed(2)}</span>
-                        <span class="pnl positive">+$${((pos.expectedNetProfit||0)/100).toFixed(2)}</span>
-                        <span style="color:#60a5fa;font-size:0.75rem;">${payoutStr}</span>
-                    </div>`;
-                }).join('');
-            } else {
-                posEl.innerHTML = '<div style="padding:20px;text-align:center;color:#6b6b88;">No positions — waiting for profitable spreads</div>';
-            }
-
-            // Trades
-            if (p.recentTrades?.length > 0) {
-                document.getElementById('trades').innerHTML = p.recentTrades.map(t => {
-                    const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : (t.entryTime ? new Date(t.entryTime).toLocaleTimeString() : '—');
-                    const isEntry = t.type === 'ENTRY';
-                    const isResolve = t.type === 'RESOLVE';
-                    const typeClass = isEntry ? 'entry' : isResolve ? 'resolve' : 'exit';
-                    const typeLabel = isEntry ? 'BUY' : isResolve ? 'RESOLVE' : 'EXIT';
-                    const cost = isEntry ? '$' + ((t.totalCost||0)/100).toFixed(2) : (t.payout ? '$' + (t.payout/100).toFixed(2) : '—');
-                    const fees = t.fees ? '$' + (t.fees/100).toFixed(2) : '—';
-                    const netPnl = t.netPnl ?? t.netPnl ?? null;
-                    const pnlStr = netPnl !== null ? ((netPnl >= 0 ? '+$' : '-$') + Math.abs(netPnl/100).toFixed(2)) : '—';
-                    const pnlClass = netPnl > 0 ? 'positive' : netPnl < 0 ? 'negative' : '';
-                    
-                    return `<div class="trade-row">
-                        <span class="trade-time">${time}</span>
-                        <span class="trade-type ${typeClass}">${typeLabel}</span>
-                        <span class="opp-name">${t.name}</span>
-                        <span>${cost}</span>
-                        <span>${fees}</span>
-                        <span class="pnl ${pnlClass}">${isEntry ? 'holding' : pnlStr}</span>
-                    </div>`;
-                }).join('');
-            }
+            updatePositions(p.positions);
+            updateTrades(p.recentTrades);
         }
 
+        // ===== UPDATE: OPPORTUNITIES =====
         function updateOpportunities(opps) {
             const el = document.getElementById('opportunities');
             if (!opps?.length) {
-                el.innerHTML = '<div style="padding:20px;text-align:center;color:#6b6b88;">Scanning markets...</div>';
+                el.innerHTML = '<div class="empty-state">Scanning markets…</div>';
                 return;
             }
-            
+
+            const desktop = isDesktop();
             el.innerHTML = opps.slice(0, 25).map(o => {
                 const gross = o.grossSpread ?? 0;
                 const fees = o.fees ?? 0;
                 const net = o.netProfit ?? (gross - fees);
                 const signal = o.isProfitable ? 'arb' : (gross > 0 ? 'watch' : 'no');
-                const netClass = net > 0 ? 'positive' : net < -2 ? 'negative' : 'neutral';
-                
-                let resolveStr = '—';
-                if (o.expiresAt) {
-                    const exp = new Date(o.expiresAt);
-                    const diffMs = exp - new Date();
-                    if (diffMs < 3600000) resolveStr = Math.ceil(diffMs/60000) + 'm';
-                    else if (diffMs < 86400000) resolveStr = Math.ceil(diffMs/3600000) + 'h';
-                    else resolveStr = Math.ceil(diffMs/86400000) + 'd';
+                const signalLabel = signal === 'arb' ? '✅ ARB' : signal === 'watch' ? '👀 Watch' : '✗';
+                const netCls = net > 0 ? 'green' : net < -2 ? 'red' : 'yellow';
+                const grossCls = gross > 0 ? 'green' : 'red';
+                const tl = timeLeft(o.expiresAt);
+
+                if (desktop) {
+                    return `<div class="opp-table-row desktop-only">
+                        <span class="opp-name-cell">${esc(o.name)}</span>
+                        <span class="item-chip ${grossCls}" style="text-align:center">${gross.toFixed(1)}¢</span>
+                        <span style="color:#f87171;font-size:0.76rem">-${fees.toFixed(1)}¢</span>
+                        <span class="item-chip ${netCls}" style="text-align:center">${net.toFixed(1)}¢</span>
+                        <span style="color:#60a5fa;font-size:0.74rem">${tl}</span>
+                        <span><span class="badge ${signal}">${signalLabel}</span></span>
+                    </div>`;
                 }
-                    
-                return `<div class="opp-row" style="grid-template-columns: 2fr 60px 60px 60px 70px 55px;">
-                    <span class="opp-name">${o.name || '?'}</span>
-                    <span class="spread ${gross > 0 ? 'positive' : 'negative'}">${gross.toFixed(1)}¢</span>
-                    <span style="color:#f87171;font-size:0.78rem;">-${fees.toFixed(1)}¢</span>
-                    <span class="spread ${netClass}">${net.toFixed(1)}¢</span>
-                    <span style="color:#60a5fa;font-size:0.72rem;">${resolveStr}</span>
-                    <span><span class="badge ${signal}">${signal === 'arb' ? '✅ ARB' : signal === 'watch' ? '👀' : '✗'}</span></span>
+
+                return `<div class="item-card mobile-only">
+                    <div class="item-card-name">${esc(o.name)}</div>
+                    <div class="item-card-row">
+                        <span class="item-chip ${grossCls}">Gross: ${gross.toFixed(1)}¢</span>
+                        <span class="item-chip red">Fees: -${fees.toFixed(1)}¢</span>
+                        <span class="item-chip ${netCls}">Net: ${net.toFixed(1)}¢</span>
+                    </div>
+                    <div class="item-card-row" style="margin-top:6px">
+                        <span class="item-chip blue">⏱ ${tl}</span>
+                        <span class="badge ${signal}">${signalLabel}</span>
+                    </div>
                 </div>`;
             }).join('');
         }
 
-        async function resetPortfolio() {
-            if (!confirm('Reset portfolio to $500/side?')) return;
-            await fetch('/api/reset', { method: 'POST' });
-            fetch('/api/portfolio').then(r => r.json()).then(updatePortfolio);
+        // ===== UPDATE: POSITIONS =====
+        function updatePositions(positions) {
+            const el = document.getElementById('positions');
+            if (!positions?.length) {
+                el.innerHTML = '<div class="empty-state">No positions — waiting for profitable spreads</div>';
+                return;
+            }
+
+            const desktop = isDesktop();
+            el.innerHTML = positions.map(pos => {
+                const cost = '$' + ((pos.totalCost || 0) / 100).toFixed(2);
+                const profit = '+$' + ((pos.expectedNetProfit || 0) / 100).toFixed(2);
+                const tl = timeLeft(pos.expiresAt);
+
+                if (desktop) {
+                    return `<div class="pos-table-row desktop-only">
+                        <span style="color:#c8c8e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(pos.name)}</span>
+                        <span style="font-size:0.76rem">P:${pos.polySide || '?'} K:${pos.kalshiSide || '?'}</span>
+                        <span>${cost}</span>
+                        <span style="color:#4ade80;font-weight:600">${profit}</span>
+                        <span style="color:#60a5fa;font-size:0.76rem">${tl}</span>
+                    </div>`;
+                }
+
+                return `<div class="item-card mobile-only">
+                    <div class="item-card-name">${esc(pos.name)}</div>
+                    <div class="item-card-row">
+                        <span class="item-chip">P:${pos.polySide || '?'} K:${pos.kalshiSide || '?'}</span>
+                        <span class="item-chip">Cost: ${cost}</span>
+                    </div>
+                    <div class="item-card-row" style="margin-top:6px">
+                        <span class="item-chip green">Profit: ${profit}</span>
+                        <span class="item-chip blue">⏱ ${tl}</span>
+                    </div>
+                </div>`;
+            }).join('');
         }
 
+        // ===== UPDATE: TRADES =====
+        function updateTrades(trades) {
+            const el = document.getElementById('trades');
+            if (!trades?.length) {
+                el.innerHTML = '<div class="empty-state">No trades yet — bot only enters when profitable after fees</div>';
+                return;
+            }
+
+            const desktop = isDesktop();
+            el.innerHTML = trades.map(t => {
+                const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) :
+                             t.entryTime ? new Date(t.entryTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—';
+                const isEntry = t.type === 'ENTRY';
+                const isResolve = t.type === 'RESOLVE';
+                const typeLabel = isEntry ? 'BUY' : isResolve ? 'RESOLVE' : 'EXIT';
+                const typeCls = isEntry ? 'blue' : isResolve ? 'purple' : 'orange';
+                const cost = isEntry ? '$' + ((t.totalCost || 0) / 100).toFixed(2) : (t.payout ? '$' + (t.payout / 100).toFixed(2) : '—');
+                const fees = t.fees ? '$' + (t.fees / 100).toFixed(2) : '—';
+                const netPnl = t.netPnl ?? null;
+                const pnlStr = netPnl !== null ? fmtPnl(netPnl / 100) : (isEntry ? 'holding' : '—');
+                const pnlCls = netPnl > 0 ? 'green' : netPnl < 0 ? 'red' : '';
+
+                if (desktop) {
+                    return `<div class="trade-table-row desktop-only">
+                        <span style="color:#555;font-family:monospace;font-size:0.74rem">${time}</span>
+                        <span class="item-chip ${typeCls}">${typeLabel}</span>
+                        <span style="color:#c8c8e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name)}</span>
+                        <span>${cost}</span>
+                        <span style="color:#f87171">${fees}</span>
+                        <span style="font-weight:600" class="${pnlCls}">${pnlStr}</span>
+                    </div>`;
+                }
+
+                return `<div class="item-card mobile-only">
+                    <div class="item-card-row" style="margin-bottom:6px">
+                        <span class="item-chip" style="font-family:monospace">${time}</span>
+                        <span class="item-chip ${typeCls}">${typeLabel}</span>
+                    </div>
+                    <div class="item-card-name">${esc(t.name)}</div>
+                    <div class="item-card-row">
+                        <span class="item-chip">Cost: ${cost}</span>
+                        <span class="item-chip red">Fee: ${fees}</span>
+                        <span class="item-chip ${pnlCls || ''}">${pnlStr}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // ===== UPDATE: CRYPTO SPEED =====
         function updateCryptoSpeed(data) {
-            if (!data?.binance) return;
-            const snap = data.binance;
-            
+            if (!data) return;
+            const snap = data.binance || data.coinbase || {};
+
             const formatPrice = (ticker, price) => {
                 if (!price) return '—';
                 if (ticker === 'SOL') return '$' + price.toFixed(2);
-                if (ticker === 'ETH') return '$' + price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                return '$' + price.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                if (ticker === 'ETH') return '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                return '$' + price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             };
-            
+
             const formatMomentum = (m) => {
                 if (!m || m.direction === 'flat') return { text: 'FLAT', cls: '' };
                 const arrow = m.changePercent > 0 ? '↑' : '↓';
@@ -412,7 +771,7 @@
                 const cls = m.changePercent > 0.15 ? 'green' : m.changePercent < -0.15 ? 'red' : 'yellow';
                 return { text: `${arrow} ${pct}%`, cls };
             };
-            
+
             for (const ticker of ['BTC', 'ETH', 'SOL']) {
                 const s = snap[ticker];
                 if (!s) continue;
@@ -422,36 +781,88 @@
                 if (momEl && s.momentum2m) {
                     const m = formatMomentum(s.momentum2m);
                     momEl.textContent = m.text;
-                    momEl.className = 'value ' + m.cls;
+                    momEl.className = 'momentum ' + m.cls;
                 }
             }
-            
+
             if (data.stats) {
-                document.getElementById('cs-markets').textContent = data.stats.activeMarkets || 0;
-                document.getElementById('cs-signals').textContent = data.stats.signals || 0;
-                const bEl = document.getElementById('binance-status');
-                if (bEl) {
-                    const dot = bEl.querySelector('.dot');
+                const mkts = document.getElementById('cs-markets');
+                const sigs = document.getElementById('cs-signals');
+                if (mkts) mkts.textContent = data.stats.activeMarkets || 0;
+                if (sigs) sigs.textContent = data.stats.signals || 0;
+                const cbEl = document.getElementById('coinbase-status');
+                if (cbEl) {
+                    const dot = cbEl.querySelector('.dot');
                     if (dot) dot.className = 'dot ' + (data.stats.binanceConnected ? 'green' : 'red');
                 }
             }
         }
 
-        setInterval(async () => {
-            try {
-                const [portfolio, opps, crypto] = await Promise.all([
-                    fetch('/api/portfolio').then(r => r.json()),
-                    fetch('/api/opportunities').then(r => r.json()),
-                    fetch('/api/crypto-speed').then(r => r.json()).catch(() => null)
-                ]);
-                updatePortfolio(portfolio);
-                updateOpportunities(opps.opportunities);
-                if (crypto) updateCryptoSpeed(crypto);
-                document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
-            } catch (e) {}
-        }, 5000);
+        // ===== UPDATE: CHAINLINK =====
+        function updateChainlink(data) {
+            if (!data) return;
+            const clPrice = document.getElementById('cl-btc-price');
+            const exPrice = document.getElementById('cl-exchange-price');
+            const divEl = document.getElementById('cl-divergence');
+            const statusEl = document.getElementById('cl-status');
+            const dotEl = document.getElementById('chainlink-status');
 
-        connect();
+            if (data.btcPrice || data.chainlinkPrice) {
+                const price = data.chainlinkPrice || data.btcPrice;
+                if (clPrice) clPrice.textContent = '$' + parseFloat(price).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            }
+            if (data.exchangePrice) {
+                if (exPrice) exPrice.textContent = '$' + parseFloat(data.exchangePrice).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            }
+            if (data.divergence !== undefined && data.divergence !== null) {
+                const div = Math.abs(parseFloat(data.divergence));
+                const divPct = (typeof data.divergencePercent === 'number') ? data.divergencePercent : div;
+                if (divEl) {
+                    divEl.textContent = divPct.toFixed(4) + '%';
+                    divEl.className = 'val ' + (divPct < 0.05 ? 'div-green' : divPct < 0.1 ? 'div-yellow' : 'div-red');
+                }
+            } else if (data.divergencePercent !== undefined) {
+                const dp = Math.abs(parseFloat(data.divergencePercent));
+                if (divEl) {
+                    divEl.textContent = dp.toFixed(4) + '%';
+                    divEl.className = 'val ' + (dp < 0.05 ? 'div-green' : dp < 0.1 ? 'div-yellow' : 'div-red');
+                }
+            }
+            if (data.connected !== undefined || data.status) {
+                const connected = data.connected ?? (data.status === 'connected');
+                if (statusEl) {
+                    statusEl.textContent = connected ? '● Connected' : '○ Disconnected';
+                    statusEl.className = 'val ' + (connected ? 'div-green' : 'div-red');
+                }
+                if (dotEl) {
+                    const dot = dotEl.querySelector('.dot');
+                    if (dot) dot.className = 'dot ' + (connected ? 'green' : 'red');
+                }
+            }
+        }
+
+        // ===== RESET =====
+        async function resetPortfolio() {
+            if (!confirm('Reset portfolio to $500/side?')) return;
+            try {
+                await fetch('/api/reset', { method: 'POST' });
+                await fetchAll();
+            } catch (e) { /* skip */ }
+        }
+        window.resetPortfolio = resetPortfolio;
+
+        // ===== HANDLE RESIZE (re-render with correct layout) =====
+        let lastWidth = window.innerWidth;
+        window.addEventListener('resize', () => {
+            const crossed = (lastWidth <= 768 && window.innerWidth > 768) || (lastWidth > 768 && window.innerWidth <= 768);
+            lastWidth = window.innerWidth;
+            if (crossed) fetchAll(); // re-render with correct layout
+        });
+
+        // ===== INIT =====
+        fetchAll();
+        startPolling();
+    })();
     </script>
 </body>
 </html>
