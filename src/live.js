@@ -1,7 +1,15 @@
 /**
  * Live Bot — Main entry point
- * Dual WebSocket: Polymarket + Kalshi real-time feeds
- * Paper trading + live dashboard
+ * 
+ * PRIMARY STRATEGY: Cross-platform arbitrage (Polymarket vs Kalshi)
+ * Buy YES on one platform + NO on the other for the SAME event.
+ * Guaranteed profit at resolution regardless of outcome.
+ * 
+ * OPTIONAL STRATEGIES (disabled by default, enable via config):
+ * - BTC 15-Min Arb: Gabagool strategy — buy UP+DOWN when sum < $1 (TRUE arb)
+ * - Crypto Speed: Speculative 15-min crypto bets (NOT arb)
+ * - Same-Market Arb: YES+NO < $1 on single platform (theoretical, finds 0)
+ * - Combinatorial: Statistical edge from related markets (NOT guaranteed profit)
  */
 
 import pmxt from 'pmxtjs';
@@ -14,11 +22,6 @@ import { EmailAlerts } from './email-alerts.js';
 import { config } from '../config.js';
 import { loadKalshiCredentials, generateKalshiHeaders, generateKalshiRestHeaders } from './kalshi-auth.js';
 import { MARKET_PAIRS, POLY_GAMMA, resolvePair } from './market-pairs.js';
-import { BinanceFeed } from './binance-feed.js';
-import { CryptoSpeedStrategy } from './crypto-speed.js';
-import { SameMarketArb } from './same-market-arb.js';
-import { CombinatorialArb } from './combinatorial-arb.js';
-import { ChainlinkFeed } from './chainlink-feed.js';
 import { insertNearMiss } from './db.js';
 import { AutoRedeemer } from './auto-redeem.js';
 import { OrderManager } from './order-manager.js';
@@ -44,18 +47,12 @@ class ExecutionLock {
         return this._locked;
     }
 
-    /**
-     * Try to acquire the lock. Returns true if acquired, false if busy.
-     */
     tryAcquire() {
         if (this._locked) return false;
         this._locked = true;
         return true;
     }
 
-    /**
-     * Acquire the lock (blocking). Returns a promise that resolves when lock is acquired.
-     */
     acquire() {
         if (!this._locked) {
             this._locked = true;
@@ -66,9 +63,6 @@ class ExecutionLock {
         });
     }
 
-    /**
-     * Release the lock. If others are waiting, hand off to next in queue.
-     */
     release() {
         if (this._queue.length > 0) {
             const next = this._queue.shift();
@@ -91,12 +85,9 @@ class LiveBot {
 
         this.scanner = new MarketScanner(this.config);
         this.trader = new PaperTrader({
-            initialBalance: 500,        // $500 per side
-            contractSize: 10,           // $10 per trade (10 contracts × $1 each)
-            // Fees now use real platform formulas:
-            // - Polymarket: 0% on event/political markets, variable on 15-min crypto
-            // - Kalshi: ceil(0.07 × price × (1-price)) per contract
-            minNetProfit: 1.0,          // Only trade if ≥1¢/contract after fees
+            initialBalance: 500,
+            contractSize: 10,
+            minNetProfit: 1.0,
             maxOpenPositions: 20,
         });
 
@@ -126,7 +117,7 @@ class LiveBot {
         // Alert system
         this.alerts = new AlertManager({
             webhookUrl: process.env.ALERT_WEBHOOK_URL || null,
-            cooldownMs: 60000,  // 1 alert per type per minute
+            cooldownMs: 60000,
         });
 
         // Email alerts
@@ -140,7 +131,7 @@ class LiveBot {
         this.circuitBreaker = new CircuitBreaker({
             maxPositionPerMarket: 50,
             maxTotalPosition: 200,
-            maxDailyLoss: 5000,          // $50 in cents
+            maxDailyLoss: 5000,
             maxConsecutiveErrors: 5,
             cooldownMs: 60000,
         });
@@ -148,14 +139,14 @@ class LiveBot {
 
         // Auto-redemption & order management
         this.autoRedeemer = new AutoRedeemer(this.polymarket, this.kalshi, this.trader, {
-            intervalMs: 5 * 60 * 1000,   // Check every 5 minutes
-            gracePeriodMs: 2 * 60 * 1000, // 2 min grace after expiry
+            intervalMs: 5 * 60 * 1000,
+            gracePeriodMs: 2 * 60 * 1000,
         });
         this.orderManager = new OrderManager({
-            timeoutMs: 10000, // 10 second timeout per order
+            timeoutMs: 10000,
         });
 
-        // ── Live/Paper Mode ─────────────────────────────────
+        // Live/Paper Mode
         this.isLiveMode = process.env.DRY_RUN === '0';
         this.liveExecutor = new LiveExecutor(this.polymarket, this.kalshi, {
             dryRun: !this.isLiveMode,
@@ -163,26 +154,28 @@ class LiveBot {
             proxyToken: process.env.ORDER_PROXY_TOKEN,
         });
 
-        // New strategies
-        this.binanceFeed = new BinanceFeed();
-        this.chainlinkFeed = new ChainlinkFeed();
-        this.cryptoSpeed = new CryptoSpeedStrategy(this.binanceFeed, this.trader, {}, this.chainlinkFeed);
-        this.sameMarketArb = new SameMarketArb(this.trader);
-        this.combinatorialArb = new CombinatorialArb(this.trader, {
-            scanIntervalMs: 60_000,     // Every 60s
-            minEdgeCents: 3,            // Min 3¢ edge
-            maxDaysToExpiry: 14,        // 2 weeks out
-            useEmbeddings: false,        // Sync mode on Fly (saves RAM). Set true locally.
-        });
+        // Optional strategies — lazy-loaded only if enabled
+        this.cryptoSpeed = null;
+        this.sameMarketArb = null;
+        this.combinatorialArb = null;
+        this.btc15minArb = null;
+        this.binanceFeed = null;
+        this.chainlinkFeed = null;
     }
 
     async start() {
         const modeTag = this.isLiveMode ? '🔴 LIVE MODE — REAL MONEY' : '📄 PAPER MODE — DRY RUN';
+        const strategies = ['Cross-Platform Arb'];
+        if (this.config.enableBtc15minArb) strategies.push('BTC 15-Min Arb (gabagool)');
+        if (this.config.enableCryptoSpeed) strategies.push('Crypto Speed (speculative)');
+        if (this.config.enableSameMarketArb) strategies.push('Same-Market Arb');
+        if (this.config.enableCombinatorialArb) strategies.push('Combinatorial (speculative)');
+
         console.log('╔═══════════════════════════════════════════════════╗');
-        console.log('║   🎯 ARB BOT v3 — MULTI-STRATEGY                ║');
+        console.log('║   🎯 ARB BOT v4 — CROSS-PLATFORM FOCUSED        ║');
         console.log(`║   ${modeTag.padEnd(47)}║`);
-        console.log('║   XP + Crypto Speed + Rebalance + Combinatorial  ║');
-        console.log('╚═══════════════════════════════════════════════════╝\n');
+        console.log('╚═══════════════════════════════════════════════════╝');
+        console.log(`\nActive strategies: ${strategies.join(', ')}\n`);
 
         if (this.isLiveMode) {
             console.log('⚠️  ⚠️  ⚠️  LIVE TRADING ENABLED — REAL ORDERS WILL BE PLACED ⚠️  ⚠️  ⚠️\n');
@@ -190,7 +183,7 @@ class LiveBot {
             console.log('[PAPER MODE] Set DRY_RUN=0 to enable live trading\n');
         }
 
-        // 1. Start dashboard FIRST and WAIT for it to bind — Fly health checks need the port open
+        // 1. Start dashboard FIRST — Fly health checks need the port open
         this.dashboard = createDashboard(this, this.trader, { port: 3456 });
         await this.dashboard.ready;
 
@@ -198,23 +191,55 @@ class LiveBot {
         this.alerts.botStarted().catch(() => {});
         this.email.botStarted().catch(() => {});
 
-        // 2. Scan & map markets (cross-platform arb)
+        // 2. Scan & map markets (cross-platform arb — always on)
         await this.scanMarkets();
 
         // 3. Connect BOTH platform WebSockets
         this.connectPolyWS();
         this.connectKalshiWS();
 
-        // 4. Start Binance feed + Chainlink feed + crypto speed strategy
-        this.binanceFeed.connect();
-        this.chainlinkFeed.connect();
-        await this.cryptoSpeed.start();
+        // 4. Optional: Crypto Speed strategy
+        if (this.config.enableCryptoSpeed) {
+            const { BinanceFeed } = await import('./binance-feed.js');
+            const { ChainlinkFeed } = await import('./chainlink-feed.js');
+            const { CryptoSpeedStrategy } = await import('./crypto-speed.js');
+            this.binanceFeed = new BinanceFeed();
+            this.chainlinkFeed = new ChainlinkFeed();
+            this.cryptoSpeed = new CryptoSpeedStrategy(this.binanceFeed, this.trader, {}, this.chainlinkFeed);
+            this.binanceFeed.connect();
+            this.chainlinkFeed.connect();
+            await this.cryptoSpeed.start();
+            console.log('[CRYPTO-SPEED] ⚡ Enabled (speculative, not true arb)');
+        }
 
-        // 5. Start same-market rebalancing arb
-        await this.sameMarketArb.start();
+        // 5. Optional: Same-market rebalancing arb
+        if (this.config.enableSameMarketArb) {
+            const { SameMarketArb } = await import('./same-market-arb.js');
+            this.sameMarketArb = new SameMarketArb(this.trader);
+            await this.sameMarketArb.start();
+            console.log('[SAME-MARKET] 🔄 Enabled');
+        }
 
-        // 6. Start combinatorial arb (entity matcher)
-        await this.combinatorialArb.start();
+        // 6. Optional: BTC 15-Min Same-Market Arb (Gabagool strategy — TRUE arb)
+        if (this.config.enableBtc15minArb) {
+            const { Btc15minArb } = await import('./btc-15min-arb.js');
+            this.btc15minArb = new Btc15minArb(this.trader, this.config);
+            await this.btc15minArb.start();
+            console.log('[BTC-15MIN-ARB] 🎯 Enabled (true arb — gabagool strategy)');
+        }
+
+        // 7. Optional: Combinatorial arb (speculative)
+        if (this.config.enableCombinatorialArb) {
+            const { CombinatorialArb } = await import('./combinatorial-arb.js');
+            this.combinatorialArb = new CombinatorialArb(this.trader, {
+                scanIntervalMs: 60_000,
+                minEdgeCents: 3,
+                maxDaysToExpiry: 14,
+                useEmbeddings: false,
+            });
+            await this.combinatorialArb.start();
+            console.log('[COMBO-ARB] 📊 Enabled (speculative, not guaranteed profit)');
+        }
 
         // 7. Start auto-redemption engine
         this.autoRedeemer.start();
@@ -225,19 +250,17 @@ class LiveBot {
         // 9. Tick every 10s — check exits, broadcast state
         setInterval(() => this.tick(), 10000);
 
-        // 10. Kalshi REST fallback every 30s (in case WS misses something)
+        // 10. Kalshi REST fallback every 30s
         setInterval(() => this.pollKalshiFallback(), 30000);
 
-        console.log('\n[LIVE] Bot running — 4 strategies active. Dashboard live.\n');
+        console.log(`\n[LIVE] Bot running — ${strategies.length} strategy(ies) active. Dashboard at :3456\n`);
     }
 
-    // ── Market Discovery (Multi-Category) ─────────────────
+    // ── Market Discovery (Curated + Auto-Discovery) ─────────
 
     async scanMarkets() {
         try {
-            console.log('\n[SCAN] Scanning all cross-platform markets...');
-            const activePairs = MARKET_PAIRS.filter(p => p.active);
-            console.log(`[SCAN] Checking ${activePairs.length} market categories...`);
+            console.log('\n[SCAN] Scanning cross-platform markets...');
 
             const fetchKalshi = async (path) => {
                 if (!this.kalshiCreds) throw new Error('No creds');
@@ -250,8 +273,12 @@ class LiveBot {
                 return res.json();
             };
 
-            const maxDays = this.config.maxDaysToExpiry || 7;
+            const maxDays = this.config.maxDaysToExpiry || 30;
             const maxExpiryMs = Date.now() + maxDays * 24 * 60 * 60 * 1000;
+
+            // ── Phase 1: Resolve curated MARKET_PAIRS ──────────
+            const activePairs = MARKET_PAIRS.filter(p => p.active);
+            console.log(`[SCAN] Phase 1: ${activePairs.length} curated pairs...`);
 
             const newMappings = [];
             for (const pair of activePairs) {
@@ -260,7 +287,6 @@ class LiveBot {
                 let skippedExpiry = 0;
                 for (const r of resolved) {
                     if (r.kalshiTicker && r.polyYes != null) {
-                        // Filter by expiry date — skip markets resolving too far out
                         if (r.expiresAt) {
                             const expiryTime = new Date(r.expiresAt).getTime();
                             if (expiryTime > maxExpiryMs) {
@@ -280,96 +306,134 @@ class LiveBot {
                             kalshiYes: r.kalshiYes,
                             kalshiNo: r.kalshiNo,
                             expiresAt: r.expiresAt,
+                            source: 'curated',
                         });
                         added++;
                     }
                 }
                 if (resolved.length > 0) {
-                    const expiryNote = skippedExpiry > 0 ? ` (${skippedExpiry} skipped: >${ maxDays}d)` : '';
+                    const expiryNote = skippedExpiry > 0 ? ` (${skippedExpiry} skipped: >${maxDays}d)` : '';
                     console.log(`  ✓ ${pair.name}: ${resolved.length} resolved, ${added} with prices${expiryNote}`);
                 }
             }
 
-            // Dynamic discovery: scan ALL open Kalshi markets and match against top Polymarket events
+            // ── Phase 2: Auto-discovery via targeted series scan ──────────
             try {
-                console.log(`\n[DISCOVERY] Scanning for additional short-dated cross-platform pairs...`);
+                console.log(`\n[DISCOVERY] Phase 2: Auto-discovering cross-platform pairs...`);
                 const maxDaysMs = maxDays * 24 * 60 * 60 * 1000;
-                
-                // Fetch all active Kalshi markets (short-dated only)
+                const existingKalshi = new Set(newMappings.map(m => m.kalshiTicker));
+                const existingPoly = new Set(newMappings.map(m => m.polyMarketId));
+
+                // 2a. Fetch Kalshi markets by targeted series (NOT all 3000+ markets)
+                const kalshiSeries = this.config.discoveryKalshiSeries || [];
                 let allKalshi = [];
-                let cursor = null;
-                let page = 0;
-                do {
-                    const path = cursor
-                        ? `/markets?status=open&limit=200&cursor=${cursor}`
-                        : '/markets?status=open&limit=200';
-                    const data = await fetchKalshi(path);
-                    if (data.markets?.length) allKalshi.push(...data.markets);
-                    cursor = data.cursor || null;
-                    page++;
-                } while (cursor && page < 10);
-                
-                // Filter Kalshi to short-dated only
+                for (const series of kalshiSeries) {
+                    try {
+                        const data = await fetchKalshi(`/markets?series_ticker=${series}&status=open&limit=50`);
+                        if (data.markets?.length) {
+                            allKalshi.push(...data.markets);
+                        }
+                    } catch (e) {
+                        // Series doesn't exist — skip
+                    }
+                }
+
+                // Filter to short-dated only
                 const shortKalshi = allKalshi.filter(m => {
+                    if (existingKalshi.has(m.ticker)) return false; // Skip already matched
                     const exp = m.expected_expiration_time || m.expiration_time;
                     if (!exp) return false;
                     return new Date(exp).getTime() <= Date.now() + maxDaysMs;
                 });
-                console.log(`[DISCOVERY] Kalshi: ${allKalshi.length} total open → ${shortKalshi.length} within ${maxDays} days`);
-                
-                // Fetch top Polymarket events by volume
-                const pRes2 = await fetch(`${POLY_GAMMA}/events?active=true&closed=false&order=volume&ascending=false&limit=100`);
-                const polyEvents = await pRes2.json();
+                console.log(`[DISCOVERY] Kalshi: ${allKalshi.length} from ${kalshiSeries.length} series → ${shortKalshi.length} short-dated unmatched`);
+
+                // 2b. Fetch top Polymarket events by volume (more than default 100)
+                const polyLimit = this.config.discoveryPolyEventLimit || 200;
+                const pRes = await fetch(`${POLY_GAMMA}/events?active=true&closed=false&order=volume&ascending=false&limit=${polyLimit}`);
+                const polyEvents = await pRes.json();
                 const allPolyMarkets = [];
                 for (const evt of (polyEvents || [])) {
                     for (const pm of (evt.markets || [])) {
-                        // Filter poly to short-dated
+                        if (existingPoly.has(pm.conditionId || pm.id)) continue; // Skip already matched
                         if (pm.endDate && new Date(pm.endDate).getTime() <= Date.now() + maxDaysMs) {
-                            allPolyMarkets.push({ ...pm, eventTitle: evt.title });
+                            allPolyMarkets.push({ ...pm, eventTitle: evt.title, eventSlug: evt.slug });
                         }
                     }
                 }
-                console.log(`[DISCOVERY] Polymarket: ${allPolyMarkets.length} short-dated markets from top events`);
+                console.log(`[DISCOVERY] Polymarket: ${allPolyMarkets.length} short-dated unmatched from ${polyLimit} events`);
+
+                // 2c. Improved fuzzy matching
+                const norm = s => (s || '').toLowerCase()
+                    .replace(/[^a-z0-9\s]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
                 
-                // Fuzzy match — find cross-platform pairs not in our curated list
-                const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
-                const existingKalshi = new Set(newMappings.map(m => m.kalshiTicker));
+                // Extract key entities for better matching (names, numbers, dates)
+                const extractEntities = (text) => {
+                    const n = norm(text);
+                    const words = n.split(' ').filter(w => w.length > 2);
+                    const numbers = n.match(/\d+/g) || [];
+                    // Key nouns that distinguish markets
+                    const keyTerms = words.filter(w => 
+                        !['will', 'the', 'for', 'and', 'not', 'than', 'more', 'less',
+                          'what', 'how', 'who', 'when', 'are', 'this', 'that', 'any',
+                          'price', 'above', 'below', 'before', 'after', 'rate', 'rates'].includes(w)
+                    );
+                    return { words, numbers, keyTerms, norm: n };
+                };
+                
+                const minSimilarity = this.config.discoveryMinSimilarity || 0.30;
                 let discovered = 0;
-                
+
                 for (const pm of allPolyMarkets) {
-                    const polyQ = norm(pm.question || pm.groupItemTitle || pm.eventTitle || '');
+                    const polyQ = extractEntities(pm.question || pm.groupItemTitle || pm.eventTitle || '');
                     let bestMatch = null;
-                    let bestSim = 0;
-                    
+                    let bestScore = 0;
+
                     for (const km of shortKalshi) {
                         if (existingKalshi.has(km.ticker)) continue;
-                        const kQ = norm(km.title || km.subtitle || '');
-                        
-                        const pWords = polyQ.split(' ').filter(w => w.length > 2);
-                        const kWords = kQ.split(' ').filter(w => w.length > 2);
-                        const common = pWords.filter(w => kWords.includes(w));
-                        const union = new Set([...pWords, ...kWords]).size;
-                        const sim = union > 0 ? common.length / union : 0;
-                        
-                        if (sim > bestSim && sim > 0.35) {
-                            bestSim = sim;
+                        const kalshiQ = extractEntities(km.title || km.subtitle || '');
+
+                        // Multi-signal scoring:
+                        // 1. Jaccard word overlap (baseline)
+                        const common = polyQ.words.filter(w => kalshiQ.words.includes(w));
+                        const union = new Set([...polyQ.words, ...kalshiQ.words]).size;
+                        const jaccard = union > 0 ? common.length / union : 0;
+
+                        // 2. Key term overlap (more important — entity names, specific nouns)
+                        const keyCommon = polyQ.keyTerms.filter(w => kalshiQ.keyTerms.includes(w));
+                        const keyUnion = new Set([...polyQ.keyTerms, ...kalshiQ.keyTerms]).size;
+                        const keyOverlap = keyUnion > 0 ? keyCommon.length / keyUnion : 0;
+
+                        // 3. Number matching (critical for price/threshold markets)
+                        const numCommon = polyQ.numbers.filter(n => kalshiQ.numbers.includes(n));
+                        const numBonus = numCommon.length > 0 ? 0.15 : 0;
+
+                        // Combined score
+                        const score = (jaccard * 0.3) + (keyOverlap * 0.55) + numBonus;
+
+                        if (score > bestScore && score > minSimilarity) {
+                            bestScore = score;
                             bestMatch = km;
                         }
                     }
-                    
+
                     if (bestMatch) {
-                        const pPrices = pm.outcomePrices ? (typeof pm.outcomePrices === 'string' ? JSON.parse(pm.outcomePrices) : pm.outcomePrices) : [];
-                        if (!pPrices[0]) continue;
-                        
+                        let pPrices;
+                        try {
+                            pPrices = typeof pm.outcomePrices === 'string' ? JSON.parse(pm.outcomePrices) : pm.outcomePrices;
+                        } catch (e) { continue; }
+                        if (!pPrices?.[0]) continue;
+
                         let tokenIds = pm.clobTokenIds;
                         if (typeof tokenIds === 'string') {
                             try { tokenIds = JSON.parse(tokenIds); } catch(e) {}
                         }
-                        
+
                         const kalshiYes = bestMatch.yes_ask || bestMatch.yes_bid || 0;
                         const kalshiNo = bestMatch.no_ask || bestMatch.no_bid || 0;
                         if (kalshiYes <= 0 && kalshiNo <= 0) continue;
-                        
+
                         newMappings.push({
                             name: pm.question || pm.groupItemTitle || bestMatch.title,
                             category: 'discovered',
@@ -381,23 +445,27 @@ class LiveBot {
                             kalshiYes,
                             kalshiNo,
                             expiresAt: bestMatch.expected_expiration_time || bestMatch.expiration_time || pm.endDate,
+                            source: 'discovered',
+                            discoveryScore: bestScore,
                         });
                         existingKalshi.add(bestMatch.ticker);
                         discovered++;
                     }
                 }
-                
+
                 if (discovered > 0) {
                     console.log(`[DISCOVERY] ✨ Found ${discovered} additional cross-platform pairs`);
                 } else {
                     console.log(`[DISCOVERY] No additional pairs found beyond curated list`);
                 }
             } catch (e) {
-                console.error('[DISCOVERY] Error in dynamic scan:', e.message);
+                console.error('[DISCOVERY] Error in auto-discovery:', e.message);
             }
 
             this.marketMappings = newMappings;
-            console.log(`[SCAN] Total: ${this.marketMappings.length} cross-platform pairs (curated + discovered), all within ${maxDays} days`);
+            const curatedCount = newMappings.filter(m => m.source === 'curated').length;
+            const discoveredCount = newMappings.filter(m => m.source === 'discovered').length;
+            console.log(`[SCAN] Total: ${this.marketMappings.length} cross-platform pairs (${curatedCount} curated + ${discoveredCount} discovered), max ${maxDays}d\n`);
 
             // Re-subscribe WebSockets
             if (this.polyConnected) this.subscribePolyMarkets();
@@ -555,7 +623,6 @@ class LiveBot {
         const tickers = this.marketMappings.map(m => m.kalshiTicker).filter(Boolean);
         if (tickers.length === 0) return;
 
-        // Subscribe to ticker channel — public, no auth needed
         const sub = {
             id: this.kalshiMsgId++,
             cmd: 'subscribe',
@@ -567,7 +634,6 @@ class LiveBot {
         this.kalshiWs.send(JSON.stringify(sub));
         console.log(`[KALSHI-WS] Subscribed to ${tickers.length} tickers`);
 
-        // Also subscribe to trade feed for extra signals
         const tradeSub = {
             id: this.kalshiMsgId++,
             cmd: 'subscribe',
@@ -589,7 +655,6 @@ class LiveBot {
             const ticker = data.market_ticker;
             const yesBid = data.yes_bid ?? null;
             const yesAsk = data.yes_ask ?? null;
-            // Kalshi prices are already in cents (1-99)
             const yesPrice = yesBid !== null ? yesBid : (yesAsk !== null ? yesAsk : null);
             const noPrice = yesPrice !== null ? (100 - yesPrice) : null;
 
@@ -609,7 +674,6 @@ class LiveBot {
         } else if (type === 'trade') {
             const data = msg.msg;
             if (!data?.market_ticker) return;
-            // Update with last trade price
             const ticker = data.market_ticker;
             const yesPrice = data.yes_price ?? null;
             if (yesPrice !== null) {
@@ -641,7 +705,6 @@ class LiveBot {
                 const ticker = market.ticker || market.id;
                 const existing = this.kalshiPrices.get(ticker);
 
-                // Only update if WS hasn't updated in 30s
                 if (existing?.source === 'ws' && (Date.now() - existing.lastUpdate) < 30000) continue;
 
                 const yes = market.outcomes?.find(o => o.label?.toLowerCase().includes('yes') || o.side === 'yes');
@@ -669,27 +732,22 @@ class LiveBot {
         const kalshi = this.kalshiPrices.get(mapping.kalshiTicker);
         if (!poly || !kalshi) return;
 
-        // Skip if any price is 0 or missing (no liquidity = no real opportunity)
         const minPrice = this.config.minPriceThreshold || 2;
         if (poly.yes <= minPrice || poly.no <= minPrice || kalshi.yes <= minPrice || kalshi.no <= minPrice) return;
 
-        // ── Time-Weighted Spread Thresholds ─────────────────
-        // Markets approaching expiry need more edge (less time for resolution)
+        // Time-weighted spread thresholds
         let spreadMultiplier = 1.0;
         if (mapping.expiresAt) {
             const msToExpiry = new Date(mapping.expiresAt) - Date.now();
             const hoursToExpiry = msToExpiry / (60 * 60 * 1000);
 
             if (hoursToExpiry < 2) {
-                // Very close to expiry — require 2x normal spread
                 spreadMultiplier = 2.0;
             } else if (hoursToExpiry < 24) {
-                // Within 24h — linearly increase from 1x to 2x as we approach 2h
                 spreadMultiplier = 1.0 + (1.0 * (24 - hoursToExpiry) / 22);
             }
         }
 
-        // Calculate both strategies using resolution arb math
         // Strategy 1: Buy Poly YES + Kalshi NO
         const cost1 = poly.yes + kalshi.no;
         const gross1 = 100 - cost1;
@@ -703,14 +761,6 @@ class LiveBot {
         const bestArb = arb1.netProfit > arb2.netProfit ? arb1 : arb2;
         const strategy = arb1.netProfit > arb2.netProfit ? 1 : 2;
         const grossSpread = Math.max(gross1, gross2);
-
-        // Apply time-weighted threshold — scale the minimum profit requirement
-        const baseMinProfit = this.trader.config?.minNetProfit || 1.0;
-        const adjustedMinProfit = baseMinProfit * spreadMultiplier;
-        if (bestArb.netProfit < adjustedMinProfit && spreadMultiplier > 1.0) {
-            // Below time-adjusted threshold — don't trade, but still track the opportunity
-            // (the paper trader will also check its own threshold, this is an additional filter)
-        }
 
         const opp = {
             name: mapping.name,
@@ -728,6 +778,7 @@ class LiveBot {
             polySource: poly.source || 'ws',
             kalshiSource: kalshi.source || 'rest',
             expiresAt: mapping.expiresAt || null,
+            source: mapping.source || 'curated',
             lastUpdate: Date.now()
         };
 
@@ -740,7 +791,7 @@ class LiveBot {
         this.currentOpportunities.sort((a, b) => b.netProfit - a.netProfit);
         this.lastUpdate = new Date().toISOString();
 
-        // Log near misses — positive gross spread but not profitable after fees
+        // Log near misses
         if (grossSpread > 0 && !bestArb.isProfitable) {
             let reason = 'fees_exceed_spread';
             if (bestArb.netProfit > 0) reason = 'below_min_profit';
@@ -758,10 +809,10 @@ class LiveBot {
             });
         }
 
-        // Trade — gate through circuit breaker + execution lock
+        // Trade
         this._executeSafeTrade(opp, mapping);
 
-        // Alert real opportunities (profitable after fees)
+        // Alert real opportunities
         if (bestArb.isProfitable && bestArb.netProfit >= this.config.alertThresholdCents) {
             const desc = strategy === 1
                 ? `Poly YES (${poly.yes.toFixed(1)}¢) + Kalshi NO (${kalshi.no.toFixed(1)}¢) = ${bestArb.totalCost.toFixed(1)}¢ cost → ${bestArb.netProfit.toFixed(1)}¢ net profit`
@@ -771,14 +822,12 @@ class LiveBot {
         }
     }
 
-    // ── Safe Trade Execution (circuit breaker + lock + balance reservation) ──
+    // ── Safe Trade Execution ────────────────────────────────
 
     async _executeSafeTrade(opp, mapping) {
-        // 1. Check circuit breaker
         const context = this._getPositionContext();
         const cbCheck = this.circuitBreaker.check(opp, context);
         if (!cbCheck.allowed) {
-            // Only log circuit breaker blocks occasionally to avoid spam
             if (!this._lastCBLog || Date.now() - this._lastCBLog > 30000) {
                 console.log(`[CIRCUIT-BREAKER] Blocked: ${cbCheck.reason}`);
                 this._lastCBLog = Date.now();
@@ -786,20 +835,15 @@ class LiveBot {
             return;
         }
 
-        // 2. Try to acquire execution lock (non-blocking)
         if (!this.executionLock.tryAcquire()) {
             this.executionLock.skippedCount++;
-            console.log(`[LOCK] Skipped: execution busy (${this.executionLock.skippedCount} total skips)`);
             return;
         }
 
         try {
-            // 3. Execute trade wrapped with OrderManager timeout
             const tradeId = `xp-${(opp.name || '').replace(/[^a-zA-Z0-9]/g, '-').substring(0, 40)}-${Date.now()}`;
 
-            // ── LIVE vs PAPER execution path ─────────────────────
             if (this.isLiveMode && mapping) {
-                // LIVE MODE: Use LiveExecutor for real orders + paper trader for tracking
                 const { status, result: liveResult, elapsedMs } = await this.orderManager.executeWithTimeout(
                     () => this.liveExecutor.execute(opp, mapping, this.trader.contractSize),
                     tradeId
@@ -808,7 +852,6 @@ class LiveBot {
                 if (status === 'timeout') {
                     console.log(`⏰ [LIVE] TRADE TIMEOUT: ${opp.name} after ${elapsedMs}ms`);
                 } else if (liveResult?.success) {
-                    // Also record in paper trader for portfolio tracking
                     const paperTrade = this.trader.executeTrade(opp);
                     this.circuitBreaker.recordSuccess();
 
@@ -822,7 +865,6 @@ class LiveBot {
                         this.dashboard.broadcast('portfolio', this.trader.getPortfolioSummary());
                     }
                 } else if (liveResult?.criticalPartialFill) {
-                    // Partial fill — one leg succeeded, one failed
                     this.circuitBreaker.recordError(new Error(`Partial fill: ${liveResult.error}`));
                     this.alerts.bigOpportunity({
                         name: `🚨 PARTIAL FILL: ${opp.name}`,
@@ -838,7 +880,6 @@ class LiveBot {
                     console.log(`❌ [LIVE] Failed: ${opp.name} — ${liveResult.error}`);
                 }
             } else {
-                // PAPER MODE: Current behavior — paper trading only
                 const { status, result: trade, elapsedMs } = await this.orderManager.executeWithTimeout(
                     () => this.trader.executeTrade(opp),
                     tradeId
@@ -847,7 +888,6 @@ class LiveBot {
                 if (status === 'timeout') {
                     console.log(`⏰ TRADE TIMEOUT: ${opp.name} after ${elapsedMs}ms`);
                 } else if (trade) {
-                    // 4. Record success with circuit breaker
                     this.circuitBreaker.recordSuccess();
 
                     const net = (trade.expectedNetProfit / 100).toFixed(2);
@@ -862,18 +902,13 @@ class LiveBot {
                 }
             }
         } catch (err) {
-            // 5. Record error with circuit breaker
             this.circuitBreaker.recordError(err);
             console.error(`[TRADE-ERROR] ${opp.name}: ${err.message}`);
         } finally {
-            // 6. Always release the lock
             this.executionLock.release();
         }
     }
 
-    /**
-     * Build position context for circuit breaker checks
-     */
     _getPositionContext() {
         const positions = this.trader.state.positions || [];
         const currentPositions = new Map();
@@ -891,14 +926,13 @@ class LiveBot {
     // ── Tick (every 10s) ────────────────────────────────────
 
     tick() {
-        // Check stop-loss exits (only on massive reversals)
+        // Check stop-loss exits
         const closed = this.trader.checkExits(this.currentOpportunities);
         for (const trade of closed) {
             const net = trade.netPnl >= 0 ? `+$${(trade.netPnl/100).toFixed(2)}` : `-$${Math.abs(trade.netPnl/100).toFixed(2)}`;
             console.log(`📉 STOP-LOSS ${trade.name} | Net: ${net} | Hold: ${Math.round(trade.holdTime/1000)}s`);
             this.alerts.positionRedeemed(trade.name, trade.netPnl).catch(() => {});
 
-            // Record losses with circuit breaker
             if (trade.netPnl < 0) {
                 this.circuitBreaker.recordLoss(Math.abs(trade.netPnl));
             }
@@ -914,24 +948,41 @@ class LiveBot {
             this.dashboard.broadcast('circuitBreaker', this.circuitBreaker.getStatus());
         }
 
-        // Broadcast Chainlink data alongside other state
-        if (this.dashboard) {
-            this.dashboard.broadcast('chainlink', this.chainlinkFeed.getSnapshot());
-        }
-
         // Count profitable opportunities
         const profitable = this.currentOpportunities.filter(o => o.isProfitable).length;
         const p = this.trader.getPortfolioSummary();
         const pWs = this.polyConnected ? '🟢' : '🔴';
         const kWs = this.kalshiConnected ? '🟢' : (this.kalshiRestMode ? '🔄' : '🔴');
-        const bWs = this.binanceFeed.connected ? '🟢' : '🔴';
-        const clWs = this.chainlinkFeed.connected ? '🟢' : '🔴';
-        const maxDays = this.config.maxDaysToExpiry || 7;
-        const csStats = this.cryptoSpeed.getStats();
-        const smStats = this.sameMarketArb.getStats();
-        const caStats = this.combinatorialArb?.stats || {};
+        const maxDays = this.config.maxDaysToExpiry || 30;
         const modeIndicator = this.isLiveMode ? '🔴LIVE' : '📄PAPER';
-        console.log(`[${new Date().toLocaleTimeString()}] ${modeIndicator} | Poly ${pWs} Kalshi ${kWs} Binance ${bWs} CL ${clWs} | XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓) CS:${csStats.activeMarkets}mkts/${csStats.signals}sig SM:${smStats.found}found CA:${caStats.opportunitiesFound || 0}opps | ${p.openPositions} pos | P&L: $${p.netPnL} | Trades: ${p.totalTrades}`);
+
+        // Build status line
+        let statusParts = [
+            `Poly ${pWs} Kalshi ${kWs}`,
+            `XP:${this.currentOpportunities.length}≤${maxDays}d(${profitable}✓)`,
+        ];
+
+        // Add optional strategy stats
+        if (this.cryptoSpeed) {
+            const cs = this.cryptoSpeed.getStats();
+            const bWs = this.binanceFeed?.connected ? '🟢' : '🔴';
+            statusParts.push(`CS:${cs.activeMarkets}mkts Bin${bWs}`);
+        }
+        if (this.sameMarketArb) {
+            const sm = this.sameMarketArb.getStats();
+            statusParts.push(`SM:${sm.found}found`);
+        }
+        if (this.combinatorialArb) {
+            const ca = this.combinatorialArb.stats || {};
+            statusParts.push(`CA:${ca.opportunitiesFound || 0}opps`);
+        }
+        if (this.btc15minArb) {
+            const g = this.btc15minArb.getStats();
+            statusParts.push(`G15:${g.activeMarkets}mkts/${g.opportunities}opp/${g.trades}trd`);
+        }
+
+        statusParts.push(`${p.openPositions} pos`, `P&L: $${p.netPnL}`, `Trades: ${p.totalTrades}`);
+        console.log(`[${new Date().toLocaleTimeString()}] ${modeIndicator} | ${statusParts.join(' | ')}`);
     }
 
     stop() {
@@ -948,6 +999,7 @@ class LiveBot {
         if (this.cryptoSpeed) this.cryptoSpeed.stop();
         if (this.sameMarketArb) this.sameMarketArb.stop();
         if (this.combinatorialArb) this.combinatorialArb.stop();
+        if (this.btc15minArb) this.btc15minArb.stop();
         if (this.dashboard?.server) this.dashboard.server.close();
         console.log('\n[STOPPED]');
     }
