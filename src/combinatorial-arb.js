@@ -1,15 +1,22 @@
 /**
- * Combinatorial Arb Strategy
+ * Combinatorial Strategy — SPECULATIVE, NOT TRUE ARBITRAGE
  * 
- * Finds pricing violations between logically related prediction markets.
- * Uses the entity matcher to detect relationships:
+ * ⚠️ IMPORTANT: This is NOT guaranteed-profit arbitrage.
+ * It finds pricing inconsistencies between logically related markets
+ * on the SAME platform (Polymarket). Profits depend on:
+ * 1. The entity matcher correctly identifying relationships
+ * 2. The market eventually correcting the mispricing
+ * 3. No edge cases in market resolution rules
+ * 
+ * Think of this as "statistical edge trading" not "arbitrage."
+ * 
+ * Relationships detected:
  *   - Implication: "Trump wins" implies "Republican wins" → P(R) must be ≥ P(T)
  *   - Inverse: "Shutdown" + "No shutdown" → prices must sum to ~$1
- *   - Equivalent: same market on Polymarket with different phrasing → should be same price
+ *   - Equivalent: same market with different phrasing → should be same price
  *   - Threshold: "BTC > 100k" implies "BTC > 95k" → higher target must be cheaper
  * 
- * Smart scanning: groups markets by event first, then matches within groups.
- * O(n) per event, not O(n²) across all markets.
+ * Disabled by default. Enable via config.enableCombinatorialArb = true
  */
 
 import { EntityMatcher, findCombinatorialArbs } from './entity-matcher.js';

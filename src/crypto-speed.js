@@ -1,14 +1,22 @@
 /**
- * Crypto Speed Strategy — 15-Minute Markets
+ * Crypto Speed Strategy — 15-Minute Markets — SPECULATIVE, NOT TRUE ARBITRAGE
  * 
- * THE EDGE: Polymarket's 15-min BTC/ETH/SOL up/down markets lag
+ * ⚠️ IMPORTANT: This is NOT arbitrage. This is a single-platform directional bet.
+ * 
+ * THE THESIS: Polymarket's 15-min BTC/ETH/SOL up/down markets lag
  * behind real-time exchange prices by 1-2 minutes. When spot price
  * is clearly trending (e.g., BTC up +0.3% in last 2 min), the
  * Polymarket market still shows ~50/50 odds.
  * 
- * We buy the correct direction at a discount and hold to resolution.
+ * We buy the direction matching the trend and hope it holds to resolution.
  * 
- * One bot did $313 → $414,000 in a month with 98% win rate using this.
+ * RISKS:
+ * - Price can reverse in the remaining time
+ * - Polymarket may not have active 15-min markets (often finds 0)
+ * - Requires Binance WebSocket feed for real-time prices
+ * - Single-platform: if Polymarket is down, strategy is dead
+ * 
+ * Disabled by default. Enable via config.enableCryptoSpeed = true
  */
 
 import { EventEmitter } from 'events';

@@ -5,7 +5,10 @@
  * This is more reliable than fuzzy matching — we verify
  * each pair refers to the SAME event/date/outcome.
  * 
- * The multi-scanner discovers candidates; this file confirms them.
+ * The auto-discovery in live.js supplements this with dynamic matching.
+ * 
+ * MAINTENANCE: Review monthly. Polymarket slugs change when events
+ * resolve or new ones are created. Kalshi series tickers are stable.
  */
 
 // Kalshi API base for fetching fresh market data
@@ -16,43 +19,53 @@ export const POLY_GAMMA = 'https://gamma-api.polymarket.com';
  * Each pair:
  * - polySlug: Polymarket event slug (fetch from gamma-api)
  * - kalshiSeries: Kalshi series ticker (fetch markets from API)
+ * - kalshiTicker: specific Kalshi market ticker (for single-market matches)
+ * - kalshiEventFilter: substring to filter Kalshi event_ticker within a series
  * - category: for UI grouping
- * - matchBy: how to match individual outcomes ('name' or 'exact')
+ * - matchBy: how to match individual outcomes ('name', 'exact', or 'strike')
  * - active: whether to monitor this pair
+ * 
+ * NOTE: polySlug values must be kept current — they change when Polymarket
+ * creates new events. Check https://gamma-api.polymarket.com/events?slug=<slug>
+ * to verify a slug is still valid. If it returns empty, the event has expired
+ * or been renamed.
  */
 export const MARKET_PAIRS = [
     // ═══════════════════════════════════════════════════════════
-    // SHORT-TERM MARKETS ONLY — resolve within days, not years
-    // Long-dated pairs deactivated (capital should turn over fast)
+    // ACTIVE CROSS-PLATFORM PAIRS
+    // These are verified to exist on BOTH platforms as of last review
     // ═══════════════════════════════════════════════════════════
 
-    // ═══ POLITICS & GOVERNMENT (near-term deadlines only) ═══
+    // ═══ POLITICS & GOVERNMENT ═══
     {
         name: 'Fed Chair Nomination',
         polySlug: 'who-will-trump-nominate-as-fed-chair',
         kalshiSeries: 'KXFEDCHAIRNOM',
         category: 'politics',
         matchBy: 'name',
-        active: false, // no imminent resolution date
+        active: true,
+        notes: 'Multi-candidate market. Long-dated but high volume.',
     },
     {
-        name: 'Government Shutdown Jan 31',
-        polySlug: 'will-there-be-another-us-government-shutdown-by-january-31',
-        kalshiTicker: 'KXGOVSHUT-26JAN31',
+        name: 'Greenland Acquisition',
+        polySlug: 'will-trump-acquire-greenland-before-2027',
+        kalshiSeries: 'KXGREENLAND',
         category: 'politics',
-        matchBy: 'exact',
-        active: true, // resolves Jan 31 — imminent!
+        matchBy: 'name',
+        active: true,
+        notes: 'Also check will-the-us-acquire-any-part-of-greenland-in-2026',
     },
-    
-    // ═══ FED & ECONOMICS (only upcoming decisions) ═══
+
+    // ═══ FED & ECONOMICS ═══
     {
-        name: 'Fed Decision March 2026',
+        name: 'Fed Decision (next meeting)',
         polySlug: 'fed-decision-in-march-885',
         kalshiSeries: 'KXFEDDECISION',
-        kalshiEventFilter: '26MAR',
+        kalshiEventFilter: '26',  // Current year events
         category: 'economics',
         matchBy: 'name',
-        active: true, // resolves on Fed meeting day
+        active: true,
+        notes: 'Poly slug changes per meeting. Update when current one resolves.',
     },
     {
         name: 'Fed Rate Cuts 2026',
@@ -60,7 +73,8 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXRATECUTCOUNT',
         category: 'economics',
         matchBy: 'name',
-        active: false, // full-year → too long
+        active: true,
+        notes: 'Full-year resolution but high volume on both platforms.',
     },
     {
         name: 'Large Fed Rate Cut 2026',
@@ -68,60 +82,125 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXLARGECUT',
         category: 'economics',
         matchBy: 'exact',
-        active: false, // full-year → too long
+        active: false, // Slug appears expired, re-enable when a new one exists
+        notes: 'Check for updated slug if Polymarket creates new "large cut" event.',
     },
     {
-        name: 'January 2026 CPI',
-        polySlug: 'january-2026-cpi',
+        name: 'Inflation US Monthly (CPI proxy)',
+        polySlug: 'january-inflation-us-monthly',
         kalshiSeries: 'KXCPI',
-        kalshiEventFilter: '26JAN',
+        kalshiEventFilter: '26',
         category: 'economics',
-        matchBy: 'name',
-        active: true, // resolves on CPI release day
-    },
-
-    // ═══ CRYPTO (daily/weekly brackets — high volatility) ═══
-    {
-        name: 'Bitcoin Price Monthly',
-        polySlug: 'what-price-will-bitcoin-hit-in-january',
-        kalshiSeries: 'KXBTC',
-        category: 'crypto',
         matchBy: 'strike',
         active: true,
+        notes: 'Polymarket calls it "Inflation" not "CPI". Slug changes monthly. Matched by threshold value.',
     },
     {
-        name: 'Bitcoin Daily',
-        polySlug: 'bitcoin-above-on-january-30',
+        name: 'GDP Q4 2025',
+        polySlug: 'us-gdp-growth-in-q4-2025',
+        kalshiSeries: 'KXGDP',
+        category: 'economics',
+        matchBy: 'strike',
+        active: true,
+        notes: 'Slug changes quarterly. Matched by threshold value. Range-bracket Poly markets are filtered out.',
+    },
+
+    // ═══ CRYPTO (daily price brackets) ═══
+    // NOTE: Crypto price markets are hard to match cross-platform because
+    // Polymarket and Kalshi use different strike prices and resolution rules.
+    // Poly: "Will BTC be above $82,000 on Feb 4?" (above/below at close)
+    // Kalshi: "Bitcoin price on Feb 4, 2026?" with strikes like $87,749.99
+    // Auto-discovery handles these better than curated pairs.
+    {
+        name: 'Bitcoin Daily Price',
+        polySlug: 'bitcoin-above-on-february-4',
         kalshiSeries: 'KXBTCD',
         category: 'crypto',
         matchBy: 'strike',
-        active: true, // daily resolution!
+        active: true,
+        notes: 'Slug changes DAILY (february-4 → february-5 etc). Hard to maintain — rely on auto-discovery.',
     },
     {
-        name: 'Ethereum Price',
-        polySlug: 'ethereum-above-on-january-30',
+        name: 'Ethereum Daily Price',
+        polySlug: 'ethereum-above-on-february-4',
         kalshiSeries: 'KXETH',
         category: 'crypto',
         matchBy: 'strike',
         active: true,
+        notes: 'Same daily slug issue as Bitcoin.',
     },
     {
-        name: 'Solana Price',
-        polySlug: 'solana-above-on-january-30',
+        name: 'Solana Daily Price',
+        polySlug: 'solana-above-on-february-4',
         kalshiSeries: 'KXSOL',
         category: 'crypto',
         matchBy: 'strike',
         active: true,
+        notes: 'Same daily slug issue. KXSOL may have 0 Kalshi markets.',
     },
 
-    // ═══ 2028 ELECTIONS (deactivated — years away) ═══
+    // ═══ SPORTS ═══
+    {
+        name: 'Super Bowl 2026',
+        polySlug: 'super-bowl-champion-2026-731',
+        kalshiSeries: 'KXSB',
+        category: 'sports',
+        matchBy: 'name',
+        active: true,
+        notes: 'Feb 2026. Kalshi has limited markets (2 teams). Poly has 33.',
+    },
+    {
+        name: 'NBA Champion 2026',
+        polySlug: '2026-nba-champion',
+        kalshiSeries: 'KXNBA',
+        category: 'sports',
+        matchBy: 'name',
+        active: true,
+        notes: 'June 2026. Both platforms have 30 teams.',
+    },
+
+    // ═══ GEOPOLITICS ═══
+    {
+        name: 'Ukraine Ceasefire by March 31',
+        polySlug: 'russia-x-ukraine-ceasefire-by-march-31-2026',
+        kalshiSeries: 'KXCEASEFIRE',
+        category: 'geopolitics',
+        matchBy: 'exact',
+        active: true,
+        notes: 'Kalshi series KXCEASEFIRE may not exist. Will be skipped gracefully.',
+    },
+    {
+        name: 'Government Shutdown',
+        polySlug: 'another-us-government-shutdown-by-february-14',
+        kalshiSeries: 'KXGOVSHUT',
+        category: 'politics',
+        matchBy: 'exact',
+        active: true,
+        notes: 'Both series may be empty if shutdown has resolved. Slug changes with new deadlines.',
+    },
+
+    // ═══ ENTERTAINMENT ═══
+    {
+        name: 'Oscars 2026 Best Picture',
+        polySlug: 'oscars-2026-best-picture-winner',
+        kalshiSeries: 'KXOSCARS',
+        category: 'entertainment',
+        matchBy: 'name',
+        active: true,
+        notes: 'Kalshi series may not exist. Will be skipped gracefully if absent.',
+    },
+
+    // ═══════════════════════════════════════════════════════════
+    // INACTIVE — kept for reference / easy reactivation
+    // ═══════════════════════════════════════════════════════════
+
     {
         name: '2028 Presidential Election',
         polySlug: 'presidential-election-winner-2028',
         kalshiSeries: 'KXPRES28',
         category: 'politics',
         matchBy: 'name',
-        active: false, // 1000+ days out
+        active: false, // 1000+ days out, low urgency
     },
     {
         name: '2028 Democratic Nominee',
@@ -129,7 +208,7 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXDEM28',
         category: 'politics',
         matchBy: 'name',
-        active: false, // 1000+ days out
+        active: false,
     },
     {
         name: '2028 Republican Nominee',
@@ -137,35 +216,7 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXREP28',
         category: 'politics',
         matchBy: 'name',
-        active: false, // 1000+ days out
-    },
-
-    // ═══ GEOPOLITICS (deactivated — open-ended) ═══
-    {
-        name: 'US Strikes Iran',
-        polySlug: 'us-strikes-iran-by',
-        kalshiSeries: 'KXUSSTRIKE',
-        category: 'geopolitics',
-        matchBy: 'name',
-        active: false, // no near-term resolution date
-    },
-
-    // ═══ SPORTS (keep — resolve on game day) ═══
-    {
-        name: 'Super Bowl 2026',
-        polySlug: 'super-bowl-champion-2026',
-        kalshiSeries: 'KXNFLSB',
-        category: 'sports',
-        matchBy: 'name',
-        active: true, // Feb 8 — close!
-    },
-    {
-        name: 'NBA Champion 2026',
-        polySlug: '2026-nba-champion',
-        kalshiSeries: 'KXNBACHAMP',
-        category: 'sports',
-        matchBy: 'name',
-        active: false, // June — too far
+        active: false,
     },
     {
         name: 'FIFA World Cup 2026',
@@ -173,7 +224,7 @@ export const MARKET_PAIRS = [
         kalshiSeries: 'KXFIFAWC',
         category: 'sports',
         matchBy: 'name',
-        active: false, // Summer 2026 — too far
+        active: false, // Summer 2026 — far out
     },
 ];
 
@@ -196,17 +247,25 @@ export async function resolvePair(pair, fetchKalshi) {
         let kalshiMarkets = [];
         if (pair.kalshiTicker) {
             // Single market
-            const km = await fetchKalshi(`/markets/${pair.kalshiTicker}`);
-            if (km.market) kalshiMarkets = [km.market];
+            try {
+                const km = await fetchKalshi(`/markets/${pair.kalshiTicker}`);
+                if (km.market) kalshiMarkets = [km.market];
+            } catch (e) {
+                // Market may have expired/been removed
+            }
         } else if (pair.kalshiSeries) {
-            const kData = await fetchKalshi(`/markets?series_ticker=${pair.kalshiSeries}&status=open&limit=50`);
-            kalshiMarkets = (kData.markets || []).filter(m => {
-                // Apply date filter if specified
-                if (pair.kalshiEventFilter) {
-                    return m.event_ticker?.includes(pair.kalshiEventFilter);
-                }
-                return true;
-            });
+            try {
+                const kData = await fetchKalshi(`/markets?series_ticker=${pair.kalshiSeries}&status=open&limit=50`);
+                kalshiMarkets = (kData.markets || []).filter(m => {
+                    // Apply date filter if specified
+                    if (pair.kalshiEventFilter) {
+                        return m.event_ticker?.includes(pair.kalshiEventFilter);
+                    }
+                    return true;
+                });
+            } catch (e) {
+                // Series may not exist on Kalshi
+            }
         }
         
         if (kalshiMarkets.length === 0) return resolved;
@@ -214,8 +273,11 @@ export async function resolvePair(pair, fetchKalshi) {
         // Match outcomes
         // Helper: build a resolved pair with proper ask-based pricing
         const buildPair = (pm, km, overrideName, sim) => {
-            const pPrices = pm.outcomePrices ? JSON.parse(pm.outcomePrices) : [];
-            if (!pPrices[0]) return null;
+            let pPrices;
+            try {
+                pPrices = typeof pm.outcomePrices === 'string' ? JSON.parse(pm.outcomePrices) : pm.outcomePrices;
+            } catch (e) { return null; }
+            if (!pPrices?.[0]) return null;
             
             // CRITICAL: Use ASK prices for buying (what you'd actually pay)
             // Poly mid-price ≈ ask (they don't split bid/ask in gamma API)
@@ -265,29 +327,127 @@ export async function resolvePair(pair, fetchKalshi) {
             const r = buildPair(pm, km, pair.name, 1.0);
             if (r) resolved.push(r);
         } else {
-            const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+            const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9\s.$%]/g, ' ').replace(/\s+/g, ' ').trim();
             
+            // Extract the distinguishing entity from a market question
+            // For "Will the Oklahoma City Thunder win the 2026 NBA Finals?" → "oklahoma city thunder"
+            // For "Bitcoin price above $82,000 on Feb 4?" → extract number 82000
+            // For "Will CPI rise more than 0.3%?" → extract number 0.3
+            const extractEntity = (text) => {
+                const n = norm(text);
+                // Extract all numbers (including decimals)
+                const numbers = (n.match(/[\d]+\.?[\d]*/g) || []).map(Number);
+                // Extract dollar amounts specifically
+                const dollars = (n.match(/\$\s*([\d,]+\.?\d*)/g) || []).map(s => parseFloat(s.replace(/[$,]/g, '')));
+                // Extract percentage amounts
+                const percents = (n.match(/([\d.]+)\s*%/g) || []).map(s => parseFloat(s));
+                // Extract key entity words (remove common words)
+                const stopWords = new Set([
+                    'will', 'the', 'be', 'is', 'are', 'was', 'in', 'on', 'at', 'to', 'of', 'for',
+                    'and', 'or', 'not', 'by', 'from', 'with', 'this', 'that', 'more', 'than',
+                    'above', 'below', 'over', 'under', 'win', 'wins', 'price', 'reach', 'hit',
+                    'championship', 'champion', 'finals', 'super', 'bowl', 'nba', 'nfl', 'pro',
+                    'football', 'basketball', 'increase', 'decrease', 'rise', 'fall', 'real',
+                    'growth', 'rate', 'rates', 'federal', 'reserve', 'fed', 'hike', 'cut',
+                    'bitcoin', 'ethereum', 'solana', 'gdp', 'cpi', 'how', 'many', 'what',
+                    '2024', '2025', '2026', '2027', '2028', '2029',
+                ]);
+                const entityWords = n.split(' ').filter(w => w.length > 1 && !stopWords.has(w) && !/^\d+$/.test(w));
+                return { numbers, dollars, percents, entityWords, norm: n };
+            };
+
+            // Track which Kalshi markets are already matched (1:1 matching)
+            // Each Kalshi market should match AT MOST one Poly market (the best fit)
+            const usedKalshiTickers = new Set();
+            
+            // First pass: compute all potential matches with scores
+            const candidates = [];
             for (const pm of polyMarkets) {
-                const pName = norm(pm.question || pm.groupItemTitle || '');
+                const pEntity = extractEntity(pm.question || pm.groupItemTitle || '');
                 
                 for (const km of kalshiMarkets) {
-                    const kName = norm(km.title || km.subtitle || '');
+                    const kEntity = extractEntity(km.title || km.subtitle || '');
+                    let score = 0;
                     
-                    const pWords = pName.split(' ').filter(w => w.length > 2);
-                    const kWords = kName.split(' ').filter(w => w.length > 2);
-                    const common = pWords.filter(w => kWords.includes(w));
-                    const similarity = common.length / Math.max(pWords.length, kWords.length);
-                    
-                    if (similarity > 0.35 || common.length >= 3) {
-                        const r = buildPair(pm, km, null, similarity);
-                        if (r) resolved.push(r);
-                        break;
+                    if (pair.matchBy === 'name') {
+                        // For name-based matching (sports teams, people, etc.)
+                        // Entity words must overlap — team names, person names
+                        if (pEntity.entityWords.length === 0 || kEntity.entityWords.length === 0) continue;
+                        
+                        const common = pEntity.entityWords.filter(w => kEntity.entityWords.includes(w));
+                        const entityOverlap = common.length / Math.max(pEntity.entityWords.length, kEntity.entityWords.length);
+                        
+                        // Require at least one entity word match
+                        if (common.length === 0) continue;
+                        score = entityOverlap;
+                        
+                    } else if (pair.matchBy === 'strike') {
+                        // For threshold/strike matching (crypto prices, economic data)
+                        // Must match on the THRESHOLD NUMBER + same question structure
+                        
+                        // Skip range-bracket markets ("between X and Y") — they don't match
+                        // threshold markets ("more than X"). These are different contracts!
+                        const pNorm = pEntity.norm;
+                        if (pNorm.includes('between') || pNorm.includes('range')) continue;
+                        
+                        // Use ONLY dollar amounts and percentages for strike matching
+                        // NOT raw numbers — those catch years (2025, 2026) as false matches
+                        const pNums = [...pEntity.dollars, ...pEntity.percents];
+                        const kNums = [...kEntity.dollars, ...kEntity.percents];
+                        
+                        if (pNums.length === 0 || kNums.length === 0) continue;
+                        
+                        // Find closest number match
+                        let closestDiff = Infinity;
+                        for (const pn of pNums) {
+                            for (const kn of kNums) {
+                                const diff = Math.abs(pn - kn) / Math.max(pn, kn);
+                                if (diff < closestDiff) closestDiff = diff;
+                            }
+                        }
+                        
+                        // Numbers must be within 2% of each other (tighter match)
+                        if (closestDiff > 0.02) continue;
+                        score = 1.0 - closestDiff;
+                        
+                    } else {
+                        // Generic fallback: Jaccard on all words
+                        const pWords = pEntity.norm.split(' ').filter(w => w.length > 2);
+                        const kWords = kEntity.norm.split(' ').filter(w => w.length > 2);
+                        const common = pWords.filter(w => kWords.includes(w));
+                        const union = new Set([...pWords, ...kWords]).size;
+                        score = union > 0 ? common.length / union : 0;
+                        if (score < 0.35) continue;
                     }
+                    
+                    if (score > 0) {
+                        candidates.push({ pm, km, score });
+                    }
+                }
+            }
+            
+            // Second pass: greedily assign best matches (1:1, no double-matching)
+            // Sort by score descending — best matches first
+            candidates.sort((a, b) => b.score - a.score);
+            const usedPoly = new Set();
+            
+            for (const { pm, km, score } of candidates) {
+                const polyId = pm.conditionId || pm.id;
+                const kalshiId = km.ticker;
+                
+                // Skip if either side is already matched
+                if (usedPoly.has(polyId) || usedKalshiTickers.has(kalshiId)) continue;
+                
+                const r = buildPair(pm, km, null, score);
+                if (r) {
+                    resolved.push(r);
+                    usedPoly.add(polyId);
+                    usedKalshiTickers.add(kalshiId);
                 }
             }
         }
     } catch (e) {
-        // Silently skip failed pairs
+        // Silently skip failed pairs — they may be outdated slugs
     }
     
     return resolved;

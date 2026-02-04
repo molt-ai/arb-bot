@@ -2,10 +2,15 @@
  * Same-Market Rebalancing Arbitrage
  * 
  * Scans a single platform for markets where YES + NO < $1.00.
- * This is pure risk-free arb — buy both sides, guaranteed profit at resolution.
+ * This IS true risk-free arb — buy both sides, guaranteed profit at resolution.
  * 
- * Windows typically last ~200ms on liquid markets, but illiquid markets
- * can hold mispricings for minutes.
+ * HOWEVER: In practice, this strategy finds 0 opportunities because:
+ * 1. Mispricings last ~200ms on liquid markets (faster than our scan interval)
+ * 2. Market makers and HFT bots snap these up instantly
+ * 3. Illiquid markets where mispricings persist have no real volume to trade
+ * 4. The Gamma API mid-prices don't reflect actual order book state
+ * 
+ * Disabled by default. Enable via config.enableSameMarketArb = true
  */
 
 const POLY_GAMMA = 'https://gamma-api.polymarket.com';
