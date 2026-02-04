@@ -1,22 +1,21 @@
 /**
- * Crypto Speed Strategy — 15-Minute Markets — SPECULATIVE, NOT TRUE ARBITRAGE
+ * Crypto Speed Strategy — Short-Term Crypto Markets
  * 
- * ⚠️ IMPORTANT: This is NOT arbitrage. This is a single-platform directional bet.
+ * THE EDGE: Polymarket's crypto directional markets (15-min, hourly, daily
+ * "above $X" / "up or down") lag behind real-time exchange prices.
+ * When Binance spot price is clearly trending, the Polymarket market
+ * still shows stale odds — we buy the correct direction at a discount.
  * 
- * THE THESIS: Polymarket's 15-min BTC/ETH/SOL up/down markets lag
- * behind real-time exchange prices by 1-2 minutes. When spot price
- * is clearly trending (e.g., BTC up +0.3% in last 2 min), the
- * Polymarket market still shows ~50/50 odds.
+ * MARKET TYPES (all supported):
+ * - 15-min "Up or Down" markets (highest edge, fastest resolution)
+ * - Hourly "above $X" markets
+ * - Daily "Bitcoin above $82,000 on February 4?" markets
  * 
- * We buy the direction matching the trend and hope it holds to resolution.
+ * Time-weighted thresholds: longer-duration markets require stronger
+ * momentum signals (bigger moves, higher strength) since there's more
+ * time for reversals. The edge decays with time remaining.
  * 
- * RISKS:
- * - Price can reverse in the remaining time
- * - Polymarket may not have active 15-min markets (often finds 0)
- * - Requires Binance WebSocket feed for real-time prices
- * - Single-platform: if Polymarket is down, strategy is dead
- * 
- * Disabled by default. Enable via config.enableCryptoSpeed = true
+ * Enabled by default alongside cross-platform arb.
  */
 
 import { EventEmitter } from 'events';
@@ -41,11 +40,48 @@ const THRESHOLDS = {
     tradeCooldownMs: 5 * 60 * 1000,  // 5 min
 };
 
-// Time-weighted edge thresholds — markets approaching expiry need MORE edge
+// ── Duration Classes ────────────────────────────────────
+// Markets are bucketed by total duration, which determines how much
+// momentum is needed to trigger a trade. A 15-min market can be
+// confidently read from a 2-min trend; a daily market needs a
+// much stronger and sustained move to overcome mean-reversion risk.
+
+const DURATION_CLASSES = {
+    INTRADAY_15M: {
+        maxTotalMinutes: 20,       // 15-min markets
+        momentumWindowMs: 2 * 60 * 1000,   // 2-min momentum
+        minChangePercent: 0.15,
+        maxBuyPrice: 68,
+        minEdge: 8,
+        minStrength: 0.25,
+        timeDecayBase: 15,         // full window for decay calc
+    },
+    INTRADAY_HOURLY: {
+        maxTotalMinutes: 90,       // ~1-hour markets
+        momentumWindowMs: 5 * 60 * 1000,   // 5-min momentum
+        minChangePercent: 0.25,
+        maxBuyPrice: 65,
+        minEdge: 12,
+        minStrength: 0.35,
+        timeDecayBase: 60,
+    },
+    DAILY: {
+        maxTotalMinutes: 24 * 60,  // daily markets (up to 24h)
+        momentumWindowMs: 10 * 60 * 1000,  // 10-min momentum
+        minChangePercent: 0.40,    // need bigger move for daily
+        maxBuyPrice: 60,           // stricter — more time for reversal
+        minEdge: 15,               // more edge required
+        minStrength: 0.45,         // stronger signal required
+        timeDecayBase: 60 * 8,     // 8-hour decay window (trading session)
+    },
+};
+
+// Time-weighted edge thresholds WITHIN a duration class
+// As a market approaches expiry, require MORE edge (less time to be right)
 const TIME_PHASES = {
-    EARLY:  { minMinutes: 10, minEdge: 8,  minStrength: 0.25 },  // >10 min left
-    MID:    { minMinutes: 5,  minEdge: 12, minStrength: 0.35 },  // 5-10 min left
-    LATE:   { minMinutes: 0,  minEdge: 18, minStrength: 0.50 },  // <5 min left
+    EARLY:  { minMinutes: 10, edgeMultiplier: 1.0, strengthMultiplier: 1.0 },  // >10 min left
+    MID:    { minMinutes: 5,  edgeMultiplier: 1.5, strengthMultiplier: 1.4 },  // 5-10 min left
+    LATE:   { minMinutes: 0,  edgeMultiplier: 2.2, strengthMultiplier: 2.0 },  // <5 min left
 };
 
 /**
@@ -130,8 +166,9 @@ export class CryptoSpeedStrategy extends EventEmitter {
     }
 
     async start() {
-        console.log('[CRYPTO-SPEED] Starting 15-min crypto strategy...');
-        console.log(`[CRYPTO-SPEED] Thresholds: ${this.config.minChangePercent}% move, strength>${this.config.minStrength}, maxBuy=${this.config.maxBuyPrice}¢`);
+        console.log('[CRYPTO-SPEED] Starting crypto speed strategy (15m / hourly / daily)...');
+        console.log(`[CRYPTO-SPEED] Base thresholds: ${this.config.minChangePercent}% move, strength>${this.config.minStrength}, maxBuy=${this.config.maxBuyPrice}¢`);
+        console.log(`[CRYPTO-SPEED] Duration classes: 15m (≤20min), hourly (≤90min), daily (≤24h)`);
 
         // Initial market scan
         await this.scanMarkets();
@@ -236,7 +273,8 @@ export class CryptoSpeedStrategy extends EventEmitter {
      * Evaluate: compare Binance momentum vs Polymarket prices
      * This runs every 5 seconds
      * 
-     * Incorporates time-weighted edge thresholds and Chainlink divergence detection
+     * Duration-aware: 15-min markets use 2-min momentum with loose thresholds,
+     * daily markets use 10-min momentum with strict thresholds (more reversal risk).
      */
     async evaluate() {
         if (this.activeMarkets.length === 0) return;
@@ -260,18 +298,27 @@ export class CryptoSpeedStrategy extends EventEmitter {
             // Skip expired markets
             if (market.endDate && new Date(market.endDate) <= Date.now()) continue;
 
-            // Calculate remaining time and determine phase
+            // Calculate remaining time
             const remainingMs = market.endDate ? new Date(market.endDate) - Date.now() : Infinity;
             const remainingMin = remainingMs / 60000;
+
+            // ── Determine duration class ────────────────────
+            const durClass = this._getDurationClass(market);
             const phase = this._getTimePhase(remainingMin);
 
-            // Get Binance momentum
-            const momentum = this.binance.getMomentum(market.ticker, 2 * 60 * 1000);  // 2-min window
-            if (!momentum || momentum.direction === 'flat') continue;
-            if (Math.abs(momentum.changePercent) < this.config.minChangePercent) continue;
+            // Duration-class-specific thresholds
+            const effectiveMinChange = durClass.minChangePercent;
+            const effectiveMaxBuy = durClass.maxBuyPrice;
+            const effectiveMinEdge = durClass.minEdge * phase.edgeMultiplier;
+            const effectiveMinStrength = durClass.minStrength * phase.strengthMultiplier;
 
-            // Time-weighted strength threshold
-            if (momentum.strength < phase.minStrength) {
+            // Get Binance momentum with duration-appropriate window
+            const momentum = this.binance.getMomentum(market.ticker, durClass.momentumWindowMs);
+            if (!momentum || momentum.direction === 'flat') continue;
+            if (Math.abs(momentum.changePercent) < effectiveMinChange) continue;
+
+            // Duration-weighted strength threshold
+            if (momentum.strength < effectiveMinStrength) {
                 this.stats.skippedByTimePhase++;
                 continue;
             }
@@ -280,13 +327,10 @@ export class CryptoSpeedStrategy extends EventEmitter {
             // Determine which side to buy based on market type and momentum
             let buyYes = false;
             if (market.direction === 'up_or_down') {
-                // "Up or Down" market: YES = up, NO = down (typically)
                 buyYes = momentum.direction === 'up';
             } else if (market.direction === 'above') {
-                // "Above X" market: YES = price stays above
                 buyYes = momentum.direction === 'up';
             } else {
-                // Default: YES = up
                 buyYes = momentum.direction === 'up';
             }
 
@@ -294,25 +338,26 @@ export class CryptoSpeedStrategy extends EventEmitter {
             const buyPrice = buyYes ? market.currentYes : market.currentNo;
             if (buyPrice === null || buyPrice <= 0) continue;
 
-            // Is it cheap enough? (market hasn't caught up to reality yet)
-            if (buyPrice > this.config.maxBuyPrice) continue;
+            // Is it cheap enough? (duration-class sets the ceiling)
+            if (buyPrice > effectiveMaxBuy) continue;
 
             // Skip dust markets — prices below 1¢ have no real liquidity
             if (buyPrice < 1) continue;
 
             // Estimate true probability from momentum — apply time decay
-            const rawProb = this._estimateProbability(momentum);
-            const estimatedProb = this._applyTimeDecay(rawProb, remainingMin);
+            const rawProb = this._estimateProbability(momentum, durClass);
+            const estimatedProb = this._applyTimeDecay(rawProb, remainingMin, durClass);
             const edge = estimatedProb - buyPrice;
 
-            // Time-weighted edge threshold (stricter as expiry approaches)
-            if (edge < phase.minEdge) {
+            // Duration-weighted edge threshold
+            if (edge < effectiveMinEdge) {
                 this.stats.skippedByTimePhase++;
                 continue;
             }
 
-            // Prevent duplicate positions for same ticker+direction
-            const posName = `⚡${market.ticker} ${buyYes ? 'UP' : 'DOWN'} (15m speed)`;
+            // Prevent duplicate positions for same ticker+direction+market
+            const durLabel = market.durationClass || '15m';
+            const posName = `⚡${market.ticker} ${buyYes ? 'UP' : 'DOWN'} (${durLabel} speed)`;
             const existingPos = this.trader.state.positions.find(p => p.name === posName);
             if (existingPos) continue;
 
@@ -334,11 +379,12 @@ export class CryptoSpeedStrategy extends EventEmitter {
                 strength: momentum.strength.toFixed(2),
                 timeLeft: market.endDate ? `${Math.round(remainingMin)}m` : '?',
                 phase: phase.name,
+                durationClass: durLabel,
             };
 
-            console.log(`\n🚀 [CRYPTO-SPEED] SIGNAL: ${signal.ticker} ${signal.side} @ ${signal.buyPrice}¢ [${phase.name}]`);
+            console.log(`\n🚀 [CRYPTO-SPEED] SIGNAL: ${signal.ticker} ${signal.side} @ ${signal.buyPrice}¢ [${durLabel}/${phase.name}]`);
             console.log(`   Momentum: ${signal.momentum} | Strength: ${signal.strength}`);
-            console.log(`   Est. prob: ${signal.estimatedProb}¢ | Edge: ${signal.edge}¢ | Time: ${signal.timeLeft} | Phase: ${phase.name} (minEdge=${phase.minEdge}¢)`);
+            console.log(`   Est. prob: ${signal.estimatedProb}¢ | Edge: ${signal.edge}¢ | Time: ${signal.timeLeft} | minEdge=${effectiveMinEdge.toFixed(0)}¢ minStr=${effectiveMinStrength.toFixed(2)}`);
 
             this.emit('signal', signal);
 
@@ -353,9 +399,34 @@ export class CryptoSpeedStrategy extends EventEmitter {
     }
 
     /**
-     * Determine time phase based on remaining minutes
-     * @param {number} remainingMin
-     * @returns {{ name: string, minEdge: number, minStrength: number }}
+     * Classify a market into a duration bucket based on its total lifespan.
+     * Stores the result on the market object for reuse.
+     */
+    _getDurationClass(market) {
+        if (market._durClass) return market._durClass;
+
+        const totalMin = market.endDate
+            ? (new Date(market.endDate) - Date.now()) / 60000
+            : Infinity;
+
+        let dc;
+        if (totalMin <= DURATION_CLASSES.INTRADAY_15M.maxTotalMinutes) {
+            dc = DURATION_CLASSES.INTRADAY_15M;
+            market.durationClass = '15m';
+        } else if (totalMin <= DURATION_CLASSES.INTRADAY_HOURLY.maxTotalMinutes) {
+            dc = DURATION_CLASSES.INTRADAY_HOURLY;
+            market.durationClass = '1h';
+        } else {
+            dc = DURATION_CLASSES.DAILY;
+            market.durationClass = 'daily';
+        }
+        market._durClass = dc;
+        return dc;
+    }
+
+    /**
+     * Determine time phase based on remaining minutes.
+     * Returns multipliers applied on top of the duration class base thresholds.
      */
     _getTimePhase(remainingMin) {
         if (remainingMin > TIME_PHASES.EARLY.minMinutes) {
@@ -368,12 +439,12 @@ export class CryptoSpeedStrategy extends EventEmitter {
     }
 
     /**
-     * Decay estimated probability as time runs out
-     * Closer to expiry → probability regresses toward 50%
-     * adjustedProb = 50 + (rawProb - 50) * (remainingMin / 15)
+     * Decay estimated probability toward 50% as time runs out.
+     * Uses the duration class's time base so a daily market doesn't
+     * instantly decay to 50 the way a 15-min market does.
      */
-    _applyTimeDecay(rawProb, remainingMin) {
-        const maxWindow = 15;  // Full 15-minute window
+    _applyTimeDecay(rawProb, remainingMin, durClass) {
+        const maxWindow = (durClass && durClass.timeDecayBase) || 15;
         const timeFactor = Math.min(remainingMin / maxWindow, 1);
         return 50 + (rawProb - 50) * timeFactor;
     }
@@ -419,8 +490,9 @@ export class CryptoSpeedStrategy extends EventEmitter {
         }
 
         // Build an opportunity object compatible with PaperTrader
+        const durLabel = market.durationClass || '15m';
         const opportunity = {
-            name: `⚡${market.ticker} ${buyYes ? 'UP' : 'DOWN'} (15m speed)`,
+            name: `⚡${market.ticker} ${buyYes ? 'UP' : 'DOWN'} (${durLabel} speed)`,
             strategy: buyYes ? 1 : 2,
             polyYes: buyYes ? executablePrice : (100 - executablePrice),
             polyNo: buyYes ? (100 - executablePrice) : executablePrice,
@@ -497,20 +569,37 @@ export class CryptoSpeedStrategy extends EventEmitter {
     }
 
     /**
-     * Estimate true probability from momentum data
-     * When BTC moves +0.3% in 2 minutes, the 15-min "Up" probability
-     * is much higher than 50% — more like 70-85%
+     * Estimate true probability from momentum data.
+     * 
+     * For 15-min markets a 0.3% move is very strong signal.
+     * For daily markets the same 0.3% is noise — need 0.5%+ to be meaningful.
+     * The duration class's minChangePercent already gates entry; this
+     * function converts the magnitude above that floor into a probability.
      */
-    _estimateProbability(momentum) {
+    _estimateProbability(momentum, durClass) {
         const absChange = Math.abs(momentum.changePercent);
 
-        // Rough mapping: momentum → implied probability (in cents)
-        // These are conservative estimates
-        if (absChange >= 0.5) return 85;       // Very strong move → 85%
-        if (absChange >= 0.3) return 75;       // Strong move → 75%
-        if (absChange >= 0.2) return 68;       // Moderate move → 68%
-        if (absChange >= 0.15) return 62;      // Mild move → 62%
-        return 55;                             // Weak → barely worth it
+        if (durClass === DURATION_CLASSES.DAILY) {
+            // Daily markets: more conservative — reversals are common
+            if (absChange >= 1.0) return 78;       // Very strong sustained move
+            if (absChange >= 0.7) return 72;       // Strong move
+            if (absChange >= 0.5) return 66;       // Moderate move
+            if (absChange >= 0.4) return 62;       // Mild but meaningful
+            return 57;
+        } else if (durClass === DURATION_CLASSES.INTRADAY_HOURLY) {
+            // Hourly markets: moderate confidence
+            if (absChange >= 0.6) return 80;
+            if (absChange >= 0.4) return 73;
+            if (absChange >= 0.25) return 65;
+            return 58;
+        } else {
+            // 15-min markets: highest confidence — momentum carries
+            if (absChange >= 0.5) return 85;
+            if (absChange >= 0.3) return 75;
+            if (absChange >= 0.2) return 68;
+            if (absChange >= 0.15) return 62;
+            return 55;
+        }
     }
 
     _isShortTermCrypto(question, endDate) {
@@ -523,11 +612,14 @@ export class CryptoSpeedStrategy extends EventEmitter {
         const isDirectional = q.includes('up or down') || q.includes('above') || q.includes('below');
         if (!isDirectional) return false;
 
-        // Check if market resolves within 4 hours (covers 15-min, hourly, and near-term)
+        // Accept markets resolving within 24 hours:
+        // - 15-min "up or down" markets (appear during US trading hours)
+        // - Hourly crypto markets
+        // - Daily "Bitcoin above $X on <date>?" markets (always available)
         if (endDate) {
             const timeLeft = new Date(endDate) - Date.now();
-            if (timeLeft <= 0) return false;           // Already expired
-            if (timeLeft > 4 * 60 * 60 * 1000) return false; // More than 4 hours out
+            if (timeLeft <= 0) return false;                      // Already expired
+            if (timeLeft > 24 * 60 * 60 * 1000) return false;    // More than 24 hours out
         }
 
         return true;

@@ -9,10 +9,12 @@ export const config = {
   // This is the ONLY strategy enabled by default.
   enableCrossPlatformArb: true,
 
-  // SPECULATIVE: Bets on Polymarket's 15-min crypto markets lagging Binance spot.
-  // NOT arbitrage — single-platform directional bet. Win rate ~60-70% historically.
-  // High risk, requires fast execution, Polymarket-only. Disabled by default.
-  enableCryptoSpeed: false,
+  // CRYPTO SPEED: Exploits Polymarket crypto markets lagging behind Binance spot.
+  // Covers 15-min, hourly, and daily "above $X" / "up or down" markets.
+  // Single-platform directional bet — not cross-platform arb, but a real edge
+  // when exchange prices lead prediction market pricing.
+  // Duration-aware: daily markets require stronger momentum than 15-min markets.
+  enableCryptoSpeed: true,
 
   // THEORETICAL ARB: Buy YES + NO on same Polymarket market when sum < $1.
   // Real arb in theory but windows last ~200ms — too fast for this bot.

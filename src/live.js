@@ -1,13 +1,15 @@
 /**
  * Live Bot — Main entry point
  * 
- * PRIMARY STRATEGY: Cross-platform arbitrage (Polymarket vs Kalshi)
- * Buy YES on one platform + NO on the other for the SAME event.
- * Guaranteed profit at resolution regardless of outcome.
+ * DEFAULT STRATEGIES (both ON):
+ * 1. Cross-Platform Arb: Buy YES on Polymarket + NO on Kalshi (or vice versa)
+ *    for the SAME event. Guaranteed profit at resolution regardless of outcome.
+ * 2. Crypto Speed: Exploit Polymarket crypto markets lagging Binance spot prices.
+ *    Covers 15-min, hourly, and daily "above $X" / "up or down" markets.
+ *    Duration-aware thresholds scale momentum requirements with market timeframe.
  * 
  * OPTIONAL STRATEGIES (disabled by default, enable via config):
  * - BTC 15-Min Arb: Gabagool strategy — buy UP+DOWN when sum < $1 (TRUE arb)
- * - Crypto Speed: Speculative 15-min crypto bets (NOT arb)
  * - Same-Market Arb: YES+NO < $1 on single platform (theoretical, finds 0)
  * - Combinatorial: Statistical edge from related markets (NOT guaranteed profit)
  */
@@ -166,8 +168,8 @@ class LiveBot {
     async start() {
         const modeTag = this.isLiveMode ? '🔴 LIVE MODE — REAL MONEY' : '📄 PAPER MODE — DRY RUN';
         const strategies = ['Cross-Platform Arb'];
+        if (this.config.enableCryptoSpeed) strategies.push('Crypto Speed (15m/hourly/daily)');
         if (this.config.enableBtc15minArb) strategies.push('BTC 15-Min Arb (gabagool)');
-        if (this.config.enableCryptoSpeed) strategies.push('Crypto Speed (speculative)');
         if (this.config.enableSameMarketArb) strategies.push('Same-Market Arb');
         if (this.config.enableCombinatorialArb) strategies.push('Combinatorial (speculative)');
 
@@ -198,7 +200,7 @@ class LiveBot {
         this.connectPolyWS();
         this.connectKalshiWS();
 
-        // 4. Optional: Crypto Speed strategy
+        // 4. Crypto Speed strategy (exchange price leads prediction market)
         if (this.config.enableCryptoSpeed) {
             const { BinanceFeed } = await import('./binance-feed.js');
             const { ChainlinkFeed } = await import('./chainlink-feed.js');
@@ -209,7 +211,7 @@ class LiveBot {
             this.binanceFeed.connect();
             this.chainlinkFeed.connect();
             await this.cryptoSpeed.start();
-            console.log('[CRYPTO-SPEED] ⚡ Enabled (speculative, not true arb)');
+            console.log('[CRYPTO-SPEED] ⚡ Enabled (15m / hourly / daily crypto markets)');
         }
 
         // 5. Optional: Same-market rebalancing arb
