@@ -5,17 +5,23 @@
  *   - Daily loss exceeds threshold
  *   - Too many consecutive execution errors
  *   - Position limits exceeded
+ *   - Partial fill detected (immediate trip — unhedged position!)
  * 
  * Auto-resets daily loss at midnight UTC.
  * Manual reset available for other trip conditions.
+ * 
+ * All limits are configurable via constructor OR env vars:
+ *   MAX_DAILY_LOSS_CENTS, MAX_POSITION_PER_MARKET,
+ *   MAX_TOTAL_POSITION, MAX_CONSECUTIVE_ERRORS
  */
 
 export class CircuitBreaker {
     constructor(config = {}) {
-        this.maxPositionPerMarket = config.maxPositionPerMarket ?? 50;
-        this.maxTotalPosition = config.maxTotalPosition ?? 200;
-        this.maxDailyLoss = config.maxDailyLoss ?? 5000;           // cents ($50)
-        this.maxConsecutiveErrors = config.maxConsecutiveErrors ?? 5;
+        // Env vars override constructor config for easy tuning without code changes
+        this.maxPositionPerMarket = _envInt('MAX_POSITION_PER_MARKET') ?? config.maxPositionPerMarket ?? 30;
+        this.maxTotalPosition = _envInt('MAX_TOTAL_POSITION') ?? config.maxTotalPosition ?? 100;
+        this.maxDailyLoss = _envInt('MAX_DAILY_LOSS_CENTS') ?? config.maxDailyLoss ?? 2000;   // cents ($20)
+        this.maxConsecutiveErrors = _envInt('MAX_CONSECUTIVE_ERRORS') ?? config.maxConsecutiveErrors ?? 3;
         this.cooldownMs = config.cooldownMs ?? 60000;              // 1 minute
 
         // State
@@ -27,6 +33,8 @@ export class CircuitBreaker {
         this.dailyTradeCount = 0;
         this.totalTrips = 0;
         this.lastResetDate = this._utcDateString();
+
+        console.log(`[CIRCUIT-BREAKER] Limits: maxDailyLoss=$${(this.maxDailyLoss / 100).toFixed(2)} | maxPerMarket=${this.maxPositionPerMarket} | maxTotal=${this.maxTotalPosition} | maxErrors=${this.maxConsecutiveErrors}`);
 
         // Schedule midnight UTC reset check every 60s
         this._midnightInterval = setInterval(() => this._checkMidnightReset(), 60000);
@@ -102,7 +110,12 @@ export class CircuitBreaker {
     }
 
     /**
-     * Record a failed trade execution — may trip the breaker
+     * Record a failed trade execution — may trip the breaker.
+     * 
+     * IMPORTANT: If the error message contains "Partial fill" or "partial fill",
+     * the breaker trips IMMEDIATELY regardless of consecutive error count.
+     * A partial fill = unhedged position = maximum danger.
+     * 
      * @param {Error|string} error
      */
     recordError(error) {
@@ -110,9 +123,30 @@ export class CircuitBreaker {
         const msg = error instanceof Error ? error.message : String(error);
         console.error(`[CIRCUIT-BREAKER] Error #${this.consecutiveErrors}: ${msg}`);
 
+        // Partial fills are catastrophic — trip immediately, don't wait for N errors
+        if (msg.toLowerCase().includes('partial fill')) {
+            this._trip(`🚨 PARTIAL FILL detected: ${msg}. UNHEDGED POSITION — manual intervention required!`);
+            return;
+        }
+
         if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
             this._trip(`${this.consecutiveErrors} consecutive execution errors (last: ${msg})`);
         }
+    }
+
+    /**
+     * Record a PARTIAL FILL — immediately trips the breaker.
+     * A partial fill means one leg of a cross-platform trade succeeded
+     * and the other failed, leaving an unhedged directional position.
+     * This is the most dangerous state — halt everything and alert.
+     * 
+     * @param {string} market — market name
+     * @param {string} details — what happened
+     */
+    recordPartialFill(market, details) {
+        this.consecutiveErrors++;
+        const reason = `🚨 PARTIAL FILL on "${market}": ${details}. UNHEDGED POSITION — manual intervention required!`;
+        this._trip(reason);
     }
 
     /**
@@ -213,6 +247,16 @@ export class CircuitBreaker {
     _utcDateString() {
         return new Date().toISOString().slice(0, 10);
     }
+}
+
+/**
+ * Parse an integer from an environment variable, or return undefined.
+ */
+function _envInt(name) {
+    const val = process.env[name];
+    if (val === undefined || val === '') return undefined;
+    const n = parseInt(val, 10);
+    return Number.isFinite(n) ? n : undefined;
 }
 
 export default CircuitBreaker;

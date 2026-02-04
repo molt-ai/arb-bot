@@ -352,7 +352,7 @@ export class LiveExecutor {
         console.log(`[LIVE-EXECUTOR] Kalshi order: BUY ${side.toUpperCase()} ${contracts} @ ${priceInCents}¢ | Ticker: ${ticker}`);
 
         const apiPath = '/trade-api/v2/portfolio/orders';
-        const baseUrl = 'https://trading-api.kalshi.com';
+        const baseUrl = 'https://api.elections.kalshi.com';
         const headers = generateKalshiRestHeaders(
             this.kalshiCreds.keyId,
             this.kalshiCreds.privateKey,
