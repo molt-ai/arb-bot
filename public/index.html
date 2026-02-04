@@ -7,7 +7,6 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0a0a0f">
-    <link rel="manifest" href="/manifest.json">
     <style>
         /* ===== RESET & BASE ===== */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,45 +18,10 @@
             -webkit-overflow-scrolling: touch;
         }
 
-        /* ===== ALERT FEED ===== */
-        .alert-feed { max-height: 300px; overflow-y: auto; }
-        .alert-item {
-            display: flex; gap: 8px; align-items: flex-start;
-            padding: 8px 10px; border-radius: 8px; margin-bottom: 4px;
-            font-size: 0.82rem; line-height: 1.3;
-            animation: alertSlide 0.3s ease-out;
-        }
-        .alert-item.info { background: #1a1a2e; border-left: 3px solid #7c8aff; }
-        .alert-item.warn { background: #2a2418; border-left: 3px solid #f59e0b; }
-        .alert-item.critical { background: #2a1818; border-left: 3px solid #ef4444; }
-        .alert-item .alert-time { color: #666; font-size: 0.72rem; white-space: nowrap; min-width: 55px; }
-        .alert-item .alert-icon { font-size: 1rem; }
-        .alert-item .alert-msg { flex: 1; word-break: break-word; }
-        @keyframes alertSlide { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-
-        .alert-badge {
-            background: #ef4444; color: #fff; font-size: 0.65rem; font-weight: 700;
-            padding: 1px 6px; border-radius: 10px; vertical-align: super; margin-left: 4px;
-        }
-        .small-btn {
-            background: #1a1a2e; color: #7c8aff; border: 1px solid #2a2a3a;
-            padding: 6px 12px; border-radius: 6px; font-size: 0.75rem; cursor: pointer;
-            min-height: 36px; touch-action: manipulation;
-        }
-        .small-btn:active { background: #2a2a3e; }
-        .small-btn.enabled { background: #1a2e1a; color: #4ade80; border-color: #2a3a2a; }
-
-        .cb-badge {
-            padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;
-        }
-        .cb-ok { background: #1a2e1a; color: #4ade80; }
-        .cb-tripped { background: #2e1a1a; color: #ef4444; animation: pulse 1s infinite; }
-        @keyframes pulse { 50% { opacity: 0.6; } }
-
         /* ===== REFRESH INDICATOR ===== */
         .refresh-bar {
             position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-            height: 3px; background: transparent; pointer-events: none;
+            height: 2px; background: transparent; pointer-events: none;
         }
         .refresh-bar.active {
             background: linear-gradient(90deg, #7c8aff, #4ade80, #7c8aff);
@@ -66,51 +30,81 @@
         }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-        .refresh-toast {
-            position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-            background: #1a1a2e; color: #7c8aff; padding: 6px 16px;
-            border-radius: 20px; font-size: 0.75rem; z-index: 101;
-            border: 1px solid #2a2a3a; opacity: 0; transition: opacity 0.3s;
-            pointer-events: none;
-        }
-        .refresh-toast.visible { opacity: 1; }
-
-        /* ===== HEADER ===== */
-        .header {
+        /* ===== TOP BANNER ===== */
+        .top-banner {
             background: linear-gradient(135deg, #12121a 0%, #1a1a2e 100%);
-            padding: 12px 16px; border-bottom: 1px solid #2a2a3a;
+            border-bottom: 1px solid #2a2a3a;
+            padding: 10px 16px;
             position: sticky; top: 0; z-index: 50;
         }
-        .header-top {
-            display: flex; justify-content: space-between; align-items: center;
-            flex-wrap: wrap; gap: 8px;
+        .banner-row {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px; flex-wrap: wrap;
         }
-        .header h1 { font-size: 1rem; color: #7c8aff; white-space: nowrap; }
-        .header-controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .banner-left { display: flex; align-items: center; gap: 10px; }
+        .banner-left h1 { font-size: 0.95rem; color: #7c8aff; white-space: nowrap; }
+        .mode-badge {
+            padding: 3px 10px; border-radius: 4px; font-size: 0.7rem;
+            font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .mode-badge.paper { background: #2a2a1a; color: #facc15; }
+        .mode-badge.live { background: #2e1a1a; color: #ef4444; animation: pulse-slow 2s infinite; }
+        @keyframes pulse-slow { 50% { opacity: 0.7; } }
+
+        .banner-right { display: flex; gap: 6px; align-items: center; }
+        .banner-right button {
+            background: #2a2a3a; color: #8888aa; border: 1px solid #3a3a4a;
+            padding: 6px 10px; border-radius: 6px; cursor: pointer;
+            font-size: 0.75rem; min-height: 32px;
+            -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+        }
+        .banner-right button:active { background: #4a4a5a; color: #fff; }
+
+        .banner-stats {
+            display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap;
+            align-items: center;
+        }
+        .banner-stat {
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .banner-stat .val {
+            font-size: 1.1rem; font-weight: 700; color: #fff;
+            line-height: 1.2;
+        }
+        .banner-stat .val.green { color: #4ade80; }
+        .banner-stat .val.red { color: #f87171; }
+        .banner-stat .val.yellow { color: #facc15; }
+        .banner-stat .lbl {
+            font-size: 0.6rem; color: #6b6b88; text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
         .status-dots {
-            display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-            font-size: 0.72rem;
+            display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+            margin-left: auto;
         }
         .status-dot {
-            display: inline-flex; align-items: center; gap: 4px;
-            padding: 4px 8px; background: #0d0d14; border-radius: 12px;
+            display: inline-flex; align-items: center; gap: 3px;
+            padding: 2px 6px; background: #0d0d14; border-radius: 10px;
+            font-size: 0.65rem; color: #6b6b88;
         }
-        .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
         .dot.green { background: #4ade80; }
         .dot.red { background: #f87171; }
         .dot.yellow { background: #facc15; }
-        .dot.blue { background: #60a5fa; }
 
-        /* ===== BUTTONS ===== */
-        button, .btn {
-            background: #2a2a3a; color: #8888aa; border: 1px solid #3a3a4a;
-            padding: 8px 14px; border-radius: 8px; cursor: pointer;
-            font-size: 0.78rem; min-height: 44px; min-width: 44px;
-            display: inline-flex; align-items: center; justify-content: center;
-            gap: 4px; transition: all 0.2s; -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;
+        .last-updated {
+            font-size: 0.6rem; color: #555; margin-top: 6px;
+            display: flex; align-items: center; gap: 4px;
         }
-        button:active, .btn:active { background: #4a4a5a; color: #fff; transform: scale(0.97); }
+        .pulse-dot {
+            width: 5px; height: 5px; border-radius: 50%; background: #4ade80;
+            animation: pulse-live 2s infinite;
+        }
+        @keyframes pulse-live {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
 
         /* ===== PAUSED OVERLAY ===== */
         .paused-overlay {
@@ -120,34 +114,37 @@
         }
         .paused-overlay.visible { display: flex; }
         .paused-overlay p { color: #6b6b88; font-size: 0.9rem; }
-        .paused-overlay button { font-size: 1rem; padding: 14px 32px; background: #7c8aff; color: #fff; border: none; }
+        .paused-overlay button {
+            font-size: 1rem; padding: 14px 32px; background: #7c8aff;
+            color: #fff; border: none; border-radius: 8px; cursor: pointer;
+        }
 
         /* ===== MAIN CONTENT ===== */
-        .content { padding: 12px; padding-bottom: 64px; max-width: 1200px; margin: 0 auto; }
+        .content { padding: 12px; padding-bottom: 24px; max-width: 1200px; margin: 0 auto; }
 
         /* ===== SECTION ===== */
-        .section { margin-bottom: 12px; }
+        .section { margin-bottom: 10px; }
         .section-header {
             display: flex; align-items: center; justify-content: space-between;
-            padding: 12px 14px; background: #12121a; border: 1px solid #2a2a3a;
-            border-radius: 10px 10px 0 0; cursor: pointer;
+            padding: 10px 14px; background: #12121a; border: 1px solid #2a2a3a;
+            border-radius: 8px 8px 0 0; cursor: pointer;
             -webkit-tap-highlight-color: transparent; touch-action: manipulation;
-            min-height: 44px; user-select: none;
+            min-height: 40px; user-select: none;
         }
-        .section.collapsed .section-header { border-radius: 10px; }
+        .section.collapsed .section-header { border-radius: 8px; }
         .section-header h2 {
-            font-size: 0.82rem; color: #8888aa; text-transform: uppercase;
+            font-size: 0.78rem; color: #8888aa; text-transform: uppercase;
             letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;
         }
         .section-toggle {
-            font-size: 0.7rem; color: #555; transition: transform 0.2s;
+            font-size: 0.65rem; color: #555; transition: transform 0.2s;
         }
         .section.collapsed .section-toggle { transform: rotate(-90deg); }
         .section-body {
             background: #12121a; border: 1px solid #2a2a3a; border-top: none;
-            border-radius: 0 0 10px 10px; padding: 14px;
+            border-radius: 0 0 8px 8px; padding: 12px;
             overflow: hidden; transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
-            max-height: 2000px; opacity: 1;
+            max-height: 3000px; opacity: 1;
         }
         .section.collapsed .section-body {
             max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0;
@@ -157,71 +154,103 @@
         /* ===== STATS GRID ===== */
         .stats-grid {
             display: grid; grid-template-columns: 1fr 1fr;
-            gap: 8px;
+            gap: 6px;
         }
         .stat-card {
-            text-align: center; padding: 10px 6px; background: #0d0d14;
-            border-radius: 8px; transition: background 0.3s;
+            text-align: center; padding: 8px 4px; background: #0d0d14;
+            border-radius: 6px;
         }
         .stat-card .val {
-            font-size: 1.3rem; font-weight: 700; color: #fff;
-            transition: color 0.3s;
+            font-size: 1.1rem; font-weight: 700; color: #fff;
         }
         .stat-card .val.green { color: #4ade80; }
         .stat-card .val.red { color: #f87171; }
         .stat-card .val.yellow { color: #facc15; }
-        .stat-card .lbl { font-size: 0.68rem; color: #6b6b88; margin-top: 2px; }
-        .fee-note { font-size: 0.68rem; color: #444; margin-top: 10px; font-style: italic; line-height: 1.4; }
+        .stat-card .val.blue { color: #60a5fa; }
+        .stat-card .lbl { font-size: 0.62rem; color: #6b6b88; margin-top: 1px; }
 
-        /* ===== CRYPTO PRICE CARDS ===== */
+        /* ===== TRUST SCORECARD ===== */
+        .trust-card {
+            background: #0d0d14; border-radius: 8px; padding: 10px 12px;
+            border: 1px solid #1a1a2a; margin-top: 8px;
+        }
+        .trust-card h3 {
+            font-size: 0.72rem; color: #8888aa; text-transform: uppercase;
+            letter-spacing: 0.3px; margin-bottom: 6px;
+            display: flex; align-items: center; gap: 5px;
+        }
+        .trust-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 4px 0; font-size: 0.78rem;
+        }
+        .trust-row .label { color: #999; display: flex; align-items: center; gap: 5px; }
+        .trust-row .value { font-weight: 600; }
+
+        /* ===== TYPE BADGES ===== */
+        .type-badge {
+            display: inline-flex; align-items: center; gap: 3px;
+            padding: 2px 7px; border-radius: 3px;
+            font-size: 0.65rem; font-weight: 700;
+            white-space: nowrap;
+        }
+        .type-badge.xp-arb { background: #1a3a2a; color: #4ade80; }
+        .type-badge.crypto-speed { background: #1a1a3a; color: #60a5fa; }
+        .type-badge.combo { background: #2a2a1a; color: #facc15; }
+        .type-badge.unknown { background: #1a1a1a; color: #666; }
+        .confidence-tag {
+            font-size: 0.6rem; color: #888; font-weight: 400; font-style: italic;
+        }
+
+        /* ===== CRYPTO CARDS ===== */
         .crypto-grid {
             display: grid; grid-template-columns: 1fr 1fr 1fr;
-            gap: 8px;
+            gap: 6px;
         }
         .crypto-card {
-            text-align: center; padding: 14px 8px; background: #0d0d14;
-            border-radius: 10px; border: 1px solid #1a1a2a;
+            text-align: center; padding: 10px 6px; background: #0d0d14;
+            border-radius: 8px; border: 1px solid #1a1a2a;
         }
-        .crypto-card .ticker { font-size: 0.7rem; color: #6b6b88; font-weight: 600; text-transform: uppercase; }
-        .crypto-card .price { font-size: 1.2rem; font-weight: 700; color: #fff; margin: 4px 0; }
-        .crypto-card .momentum { font-size: 0.78rem; font-weight: 600; }
+        .crypto-card .ticker { font-size: 0.65rem; color: #6b6b88; font-weight: 600; text-transform: uppercase; }
+        .crypto-card .price { font-size: 1rem; font-weight: 700; color: #fff; margin: 3px 0; }
+        .crypto-card .momentum { font-size: 0.72rem; font-weight: 600; }
         .crypto-card .momentum.green { color: #4ade80; }
         .crypto-card .momentum.red { color: #f87171; }
         .crypto-card .momentum.yellow { color: #facc15; }
-        .crypto-meta { display: flex; gap: 8px; margin-top: 8px; }
+        .crypto-meta { display: flex; gap: 6px; margin-top: 8px; }
         .crypto-meta .stat-card { flex: 1; }
 
-        /* ===== CHAINLINK CARD ===== */
+        /* ===== CHAINLINK GRID ===== */
         .chainlink-grid {
             display: grid; grid-template-columns: 1fr 1fr;
-            gap: 8px;
+            gap: 6px;
         }
         .chainlink-card {
-            text-align: center; padding: 12px 8px; background: #0d0d14;
-            border-radius: 8px;
+            text-align: center; padding: 10px 6px; background: #0d0d14;
+            border-radius: 6px;
         }
-        .chainlink-card .val { font-size: 1.1rem; font-weight: 700; color: #fff; }
-        .chainlink-card .lbl { font-size: 0.68rem; color: #6b6b88; margin-top: 2px; }
+        .chainlink-card .val { font-size: 1rem; font-weight: 700; color: #fff; }
+        .chainlink-card .lbl { font-size: 0.62rem; color: #6b6b88; margin-top: 2px; }
         .div-green { color: #4ade80 !important; }
         .div-yellow { color: #facc15 !important; }
         .div-red { color: #f87171 !important; }
 
-        /* ===== ITEM CARDS (opps, positions, trades) ===== */
-        .item-cards { display: flex; flex-direction: column; gap: 8px; }
+        /* ===== ITEM CARDS ===== */
+        .item-cards { display: flex; flex-direction: column; gap: 6px; }
+        .item-cards.limited { max-height: 500px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
         .item-card {
-            background: #0d0d14; border-radius: 8px; padding: 12px;
-            border: 1px solid #1a1a2a; transition: border-color 0.2s;
+            background: #0d0d14; border-radius: 6px; padding: 10px;
+            border: 1px solid #1a1a2a;
         }
         .item-card-name {
-            font-size: 0.85rem; font-weight: 500; color: #c8c8e0;
-            margin-bottom: 8px; line-height: 1.3;
+            font-size: 0.82rem; font-weight: 500; color: #c8c8e0;
+            margin-bottom: 6px; line-height: 1.3;
             display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
         .item-card-row {
-            display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+            display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
         }
         .item-chip {
-            font-size: 0.72rem; padding: 3px 8px; border-radius: 4px;
+            font-size: 0.68rem; padding: 2px 6px; border-radius: 3px;
             background: #1a1a2a; color: #8888aa; white-space: nowrap;
         }
         .item-chip.green { background: #1a3a2a; color: #4ade80; }
@@ -229,151 +258,237 @@
         .item-chip.yellow { background: #2a2a1a; color: #facc15; }
         .item-chip.blue { background: #1a1a3a; color: #60a5fa; }
         .item-chip.purple { background: #2a1a3a; color: #a78bfa; }
-        .item-chip.orange { background: #2a1e1a; color: #f97316; }
 
-        /* Badge for signal */
+        /* Signal badges */
         .badge {
-            font-size: 0.68rem; padding: 3px 8px; border-radius: 4px;
+            font-size: 0.62rem; padding: 2px 7px; border-radius: 3px;
             font-weight: 700; display: inline-flex; align-items: center; gap: 3px;
         }
         .badge.arb { background: #1a3a2a; color: #4ade80; }
         .badge.watch { background: #2a2a1a; color: #facc15; }
         .badge.no { background: #1a1a1a; color: #555; }
 
-        /* ===== EMPTY STATE ===== */
+        /* ===== EXPANDABLE REASONING ===== */
+        .reasoning-toggle {
+            font-size: 0.65rem; color: #555; cursor: pointer; margin-top: 4px;
+            display: inline-block;
+        }
+        .reasoning-toggle:hover { color: #888; }
+        .reasoning-body {
+            display: none; margin-top: 6px; padding: 6px 8px;
+            background: #0a0a12; border-radius: 4px; border: 1px solid #1a1a2a;
+            font-size: 0.7rem; color: #888; line-height: 1.4;
+        }
+        .reasoning-body.open { display: block; }
+
+        /* ===== SVG CHART ===== */
+        .chart-container {
+            margin-top: 10px; background: #0d0d14; border-radius: 6px;
+            padding: 10px; border: 1px solid #1a1a2a;
+        }
+        .chart-container svg { width: 100%; height: 100px; }
+        .chart-label {
+            font-size: 0.62rem; color: #555; margin-bottom: 4px;
+        }
+
+        /* ===== ALERT FEED ===== */
+        .alert-feed { max-height: 250px; overflow-y: auto; }
+        .alert-item {
+            display: flex; gap: 6px; align-items: flex-start;
+            padding: 6px 8px; border-radius: 6px; margin-bottom: 3px;
+            font-size: 0.75rem; line-height: 1.3;
+        }
+        .alert-item.info { background: #1a1a2e; border-left: 2px solid #7c8aff; }
+        .alert-item.warn { background: #2a2418; border-left: 2px solid #f59e0b; }
+        .alert-item.critical { background: #2a1818; border-left: 2px solid #ef4444; }
+        .alert-item .alert-time { color: #555; font-size: 0.65rem; white-space: nowrap; min-width: 48px; }
+        .alert-item .alert-msg { flex: 1; word-break: break-word; }
+
+        .alert-badge {
+            background: #ef4444; color: #fff; font-size: 0.6rem; font-weight: 700;
+            padding: 1px 5px; border-radius: 8px; vertical-align: super; margin-left: 4px;
+        }
+
+        .small-btn {
+            background: #1a1a2e; color: #7c8aff; border: 1px solid #2a2a3a;
+            padding: 4px 10px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;
+            min-height: 28px; touch-action: manipulation;
+        }
+        .small-btn:active { background: #2a2a3e; }
+
+        .cb-badge {
+            padding: 3px 8px; border-radius: 4px; font-size: 0.68rem; font-weight: 600;
+        }
+        .cb-ok { background: #1a2e1a; color: #4ade80; }
+        .cb-tripped { background: #2e1a1a; color: #ef4444; animation: pulse-slow 1s infinite; }
+
         .empty-state {
-            padding: 24px 16px; text-align: center; color: #6b6b88;
-            font-size: 0.82rem;
+            padding: 20px 16px; text-align: center; color: #6b6b88;
+            font-size: 0.78rem;
         }
 
-        /* ===== SCROLLABLE LIMIT ===== */
-        .item-cards.limited { max-height: 500px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-
-        /* ===== BOTTOM BAR ===== */
-        .bottom-bar {
-            position: fixed; bottom: 0; left: 0; right: 0;
-            background: #12121a; border-top: 1px solid #2a2a3a;
-            padding: 10px 16px; display: flex; justify-content: space-between;
-            font-size: 0.7rem; color: #6b6b88; z-index: 50;
-            align-items: center;
+        /* ===== DESKTOP TABLE ROWS ===== */
+        .table-header, .table-row {
+            display: none;
         }
 
-        /* ===== DESKTOP OVERRIDES (>768px) ===== */
+        /* ===== DESKTOP OVERRIDES ===== */
         @media (min-width: 769px) {
             .content { padding: 16px; }
-            .header { padding: 14px 24px; }
-            .header h1 { font-size: 1.15rem; }
-
             .stats-grid { grid-template-columns: repeat(5, 1fr); }
-
+            .trust-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
             .two-col-grid {
-                display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+                display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
             }
 
-            /* Desktop: compact table rows for opportunities */
-            .opp-table-header {
-                display: grid !important; grid-template-columns: 2.5fr 65px 65px 65px 70px 60px;
-                padding: 6px 12px; color: #6b6b88; font-size: 0.7rem;
+            /* Desktop tables */
+            .table-header {
+                display: grid !important;
+                padding: 5px 10px; color: #6b6b88; font-size: 0.65rem;
                 text-transform: uppercase; border-bottom: 1px solid #2a2a3a;
+                letter-spacing: 0.3px;
             }
-            .opp-table-row {
-                display: grid !important; grid-template-columns: 2.5fr 65px 65px 65px 70px 60px;
-                padding: 7px 12px; border-bottom: 1px solid #0d0d14;
-                font-size: 0.78rem; align-items: center;
+            .table-row {
+                display: grid !important;
+                padding: 6px 10px; border-bottom: 1px solid #0d0d14;
+                font-size: 0.75rem; align-items: center;
             }
-            .opp-table-row .opp-name-cell {
+            .table-row:hover { background: #0f0f18; }
+
+            .opp-cols { grid-template-columns: 2.5fr 60px 60px 60px 55px 55px; }
+            .pos-cols { grid-template-columns: 2fr 80px 65px 65px 70px 70px 65px; }
+            .trade-cols { grid-template-columns: 60px 70px 2fr 70px 70px 70px; }
+
+            .table-row .cell-name {
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
                 color: #c8c8e0;
             }
 
-            /* Desktop: compact table for positions */
-            .pos-table-header {
-                display: grid !important; grid-template-columns: 2.5fr 80px 75px 80px 100px;
-                padding: 6px 12px; color: #6b6b88; font-size: 0.7rem;
-                text-transform: uppercase; border-bottom: 1px solid #2a2a3a;
-            }
-            .pos-table-row {
-                display: grid !important; grid-template-columns: 2.5fr 80px 75px 80px 100px;
-                padding: 7px 12px; border-bottom: 1px solid #0d0d14;
-                font-size: 0.78rem; align-items: center;
-            }
-
-            /* Desktop: compact table for trades */
-            .trade-table-header {
-                display: grid !important; grid-template-columns: 70px 65px 2.5fr 85px 85px 80px;
-                padding: 6px 12px; color: #6b6b88; font-size: 0.7rem;
-                text-transform: uppercase; border-bottom: 1px solid #2a2a3a;
-            }
-            .trade-table-row {
-                display: grid !important; grid-template-columns: 70px 65px 2.5fr 85px 85px 80px;
-                padding: 7px 12px; border-bottom: 1px solid #0d0d14;
-                font-size: 0.78rem; align-items: center;
-            }
-
-            /* Hide mobile-only elements */
             .mobile-only { display: none !important; }
         }
 
-        /* Mobile: hide desktop table headers and rows */
         @media (max-width: 768px) {
             .desktop-only { display: none !important; }
-            .crypto-card .price { font-size: 1rem; }
+            .crypto-card .price { font-size: 0.9rem; }
+            .banner-stat .val { font-size: 0.95rem; }
         }
     </style>
 </head>
 <body>
-    <!-- Refresh indicator -->
     <div class="refresh-bar" id="refresh-bar"></div>
-    <div class="refresh-toast" id="refresh-toast">↻ Refreshing…</div>
 
     <!-- Paused overlay -->
     <div class="paused-overlay" id="paused-overlay">
-        <p>⏸ Auto-refresh paused (tab idle)</p>
-        <button onclick="resumeRefresh()">↻ Tap to Refresh</button>
+        <p>⏸ Auto-refresh paused</p>
+        <button onclick="resumeRefresh()">↻ Resume</button>
     </div>
 
-    <!-- Header -->
-    <div class="header">
-        <div class="header-top">
-            <h1>🎯 Arb Bot v2</h1>
-            <div class="header-controls">
+    <!-- Top Banner -->
+    <div class="top-banner">
+        <div class="banner-row">
+            <div class="banner-left">
+                <h1>🎯 Arb Bot</h1>
+                <span class="mode-badge paper" id="mode-badge">PAPER</span>
+            </div>
+            <div class="banner-right">
                 <div class="status-dots">
                     <span class="status-dot" id="poly-status"><span class="dot green"></span> Poly</span>
                     <span class="status-dot" id="kalshi-status"><span class="dot green"></span> Kalshi</span>
-                    <span class="status-dot" id="coinbase-status"><span class="dot yellow"></span> Coinbase</span>
-                    <span class="status-dot" id="chainlink-status"><span class="dot yellow"></span> CL</span>
+                    <span class="status-dot" id="binance-status"><span class="dot yellow"></span> Binance</span>
+                    <span class="status-dot" id="chainlink-dot"><span class="dot yellow"></span> CL</span>
                 </div>
                 <button onclick="manualRefresh()">↻</button>
-                <button onclick="resetPortfolio()">Reset</button>
             </div>
+        </div>
+        <div class="banner-stats">
+            <div class="banner-stat">
+                <span class="val green" id="bn-pnl">$0.00</span>
+                <span class="lbl">Net P&L</span>
+            </div>
+            <div class="banner-stat">
+                <span class="val" id="bn-winrate">—</span>
+                <span class="lbl">Win Rate</span>
+            </div>
+            <div class="banner-stat">
+                <span class="val" id="bn-trades">0</span>
+                <span class="lbl">Trades</span>
+            </div>
+            <div class="banner-stat">
+                <span class="val" id="bn-open">0</span>
+                <span class="lbl">Open</span>
+            </div>
+            <div class="banner-stat">
+                <span class="val" id="bn-uptime">—</span>
+                <span class="lbl">Uptime</span>
+            </div>
+        </div>
+        <div class="last-updated">
+            <span class="pulse-dot" id="live-dot"></span>
+            <span id="last-update">Connecting…</span>
         </div>
     </div>
 
     <div class="content">
-        <!-- Portfolio Stats -->
+
+        <!-- ===== PORTFOLIO ===== -->
         <div class="section" id="sec-portfolio">
             <div class="section-header" onclick="toggleSection('sec-portfolio')">
-                <h2>📊 Portfolio — $500 per side</h2>
+                <h2>💰 Portfolio</h2>
                 <span class="section-toggle">▼</span>
             </div>
             <div class="section-body">
                 <div class="stats-grid">
-                    <div class="stat-card"><div class="val green" id="net-pnl">$0.00</div><div class="lbl">Net P&L</div></div>
-                    <div class="stat-card"><div class="val" id="total-trades">0</div><div class="lbl">Total Trades</div></div>
-                    <div class="stat-card"><div class="val" id="win-rate">0%</div><div class="lbl">Win Rate</div></div>
-                    <div class="stat-card"><div class="val" id="open-positions">0</div><div class="lbl">Open Positions</div></div>
-                    <div class="stat-card"><div class="val" id="expected-profit">$0.00</div><div class="lbl">Expected Profit</div></div>
-                    <div class="stat-card"><div class="val" id="total-value">$1,000</div><div class="lbl">Total Value</div></div>
-                    <div class="stat-card"><div class="val yellow" id="gross-pnl">$0.00</div><div class="lbl">Gross P&L</div></div>
-                    <div class="stat-card"><div class="val red" id="fees-paid">$0.00</div><div class="lbl">Fees Paid</div></div>
-                    <div class="stat-card"><div class="val" id="poly-balance">$500</div><div class="lbl">Poly Bal</div></div>
-                    <div class="stat-card"><div class="val" id="kalshi-balance">$500</div><div class="lbl">Kalshi Bal</div></div>
+                    <div class="stat-card"><div class="val" id="poly-balance">—</div><div class="lbl">Poly Balance</div></div>
+                    <div class="stat-card"><div class="val" id="kalshi-balance">—</div><div class="lbl">Kalshi Balance</div></div>
+                    <div class="stat-card"><div class="val blue" id="deployed">—</div><div class="lbl">Deployed</div></div>
+                    <div class="stat-card"><div class="val" id="available-cash">—</div><div class="lbl">Available Cash</div></div>
+                    <div class="stat-card"><div class="val" id="total-value">—</div><div class="lbl">Total Value</div></div>
+                    <div class="stat-card"><div class="val green" id="realized-pnl">—</div><div class="lbl">Realized P&L</div></div>
+                    <div class="stat-card"><div class="val yellow" id="unrealized-pnl">—</div><div class="lbl">Unrealized</div></div>
+                    <div class="stat-card"><div class="val red" id="fees-paid">—</div><div class="lbl">Fees Paid</div></div>
+                    <div class="stat-card"><div class="val" id="best-trade">—</div><div class="lbl">Best Trade</div></div>
+                    <div class="stat-card"><div class="val" id="worst-trade">—</div><div class="lbl">Worst Trade</div></div>
                 </div>
-                <div class="fee-note">3 strategies: Cross-Platform Arb (Poly↔Kalshi) · Crypto Speed (Coinbase→Poly 15min) · Same-Market Rebalancing (YES+NO&lt;$1)</div>
+
+                <!-- Trust Scorecard -->
+                <div class="trust-grid">
+                    <div class="trust-card" id="trust-arb">
+                        <h3>✅ True Arb (Guaranteed)</h3>
+                        <div class="trust-row"><span class="label">Resolved</span><span class="value" id="ta-resolved">0</span></div>
+                        <div class="trust-row"><span class="label">Open</span><span class="value" id="ta-open">0</span></div>
+                        <div class="trust-row"><span class="label">W / L</span><span class="value" id="ta-wl">0 / 0</span></div>
+                        <div class="trust-row"><span class="label">Net P&L</span><span class="value green" id="ta-pnl">$0.00</span></div>
+                        <div class="trust-row"><span class="label">Avg Profit</span><span class="value" id="ta-avg">$0.00</span></div>
+                    </div>
+                    <div class="trust-card" id="trust-spec">
+                        <h3>⚠️ Speculative (Not Guaranteed)</h3>
+                        <div class="trust-row"><span class="label">Resolved</span><span class="value" id="ts-resolved">0</span></div>
+                        <div class="trust-row"><span class="label">Open</span><span class="value" id="ts-open">0</span></div>
+                        <div class="trust-row"><span class="label">W / L</span><span class="value" id="ts-wl">0 / 0</span></div>
+                        <div class="trust-row"><span class="label">Net P&L</span><span class="value yellow" id="ts-pnl">$0.00</span></div>
+                        <div class="trust-row"><span class="label">Avg Profit</span><span class="value" id="ts-avg">$0.00</span></div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Crypto Prices -->
+        <!-- ===== CROSS-PLATFORM ARB ===== -->
+        <div class="section" id="sec-opps">
+            <div class="section-header" onclick="toggleSection('sec-opps')">
+                <h2>🔥 Cross-Platform Arb</h2>
+                <span class="section-toggle">▼</span>
+            </div>
+            <div class="section-body">
+                <div class="table-header opp-cols desktop-only">
+                    <span>Market</span><span>Gross</span><span>Fees</span><span>Net</span><span>Time</span><span>Signal</span>
+                </div>
+                <div id="opportunities" class="item-cards limited">
+                    <div class="empty-state">Scanning markets…</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== CRYPTO SPEED ===== -->
         <div class="section" id="sec-crypto">
             <div class="section-header" onclick="toggleSection('sec-crypto')">
                 <h2>⚡ Crypto Speed</h2>
@@ -398,27 +513,29 @@
                     </div>
                 </div>
                 <div class="crypto-meta">
-                    <div class="stat-card"><div class="val" id="cs-markets">0</div><div class="lbl">15m Markets</div></div>
+                    <div class="stat-card"><div class="val" id="cs-markets">0</div><div class="lbl">Active Markets</div></div>
                     <div class="stat-card"><div class="val" id="cs-signals">0</div><div class="lbl">Signals</div></div>
+                    <div class="stat-card"><div class="val" id="cs-evals">0</div><div class="lbl">Evaluations</div></div>
+                    <div class="stat-card"><div class="val" id="cs-trades">0</div><div class="lbl">Speed Trades</div></div>
                 </div>
             </div>
         </div>
 
-        <!-- Chainlink -->
+        <!-- ===== CHAINLINK ===== -->
         <div class="section" id="sec-chainlink">
             <div class="section-header" onclick="toggleSection('sec-chainlink')">
                 <h2>🔗 Chainlink Oracle</h2>
                 <span class="section-toggle">▼</span>
             </div>
             <div class="section-body">
-                <div class="chainlink-grid" id="chainlink-data">
+                <div class="chainlink-grid">
                     <div class="chainlink-card">
                         <div class="val" id="cl-btc-price">—</div>
-                        <div class="lbl">CL BTC Price</div>
+                        <div class="lbl">Chainlink BTC</div>
                     </div>
                     <div class="chainlink-card">
                         <div class="val" id="cl-exchange-price">—</div>
-                        <div class="lbl">Exchange Price</div>
+                        <div class="lbl">Binance BTC</div>
                     </div>
                     <div class="chainlink-card">
                         <div class="val" id="cl-divergence">—</div>
@@ -426,88 +543,68 @@
                     </div>
                     <div class="chainlink-card">
                         <div class="val" id="cl-status">—</div>
-                        <div class="lbl">Status</div>
+                        <div class="lbl">Feed Status</div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Alert Feed + Circuit Breaker -->
-        <div class="section" id="sec-alerts">
-            <div class="section-header" onclick="toggleSection('sec-alerts')">
-                <h2>🔔 Alerts <span id="alert-badge" class="alert-badge" style="display:none">0</span></h2>
-                <span class="section-toggle">▼</span>
-            </div>
-            <div class="section-body">
-                <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
-                    <button onclick="clearAlerts()" class="small-btn">Clear</button>
-                    <span id="cb-status" class="cb-badge cb-ok">CB: OK</span>
-                </div>
-                <div id="alert-feed" class="alert-feed">
-                    <div class="empty-state">No alerts yet — trades, errors, and circuit breaker events show here</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Opportunities & Positions side by side on desktop -->
+        <!-- Two column: Positions + Trades on desktop -->
         <div class="two-col-grid">
-            <!-- Opportunities -->
-            <div class="section" id="sec-opps">
-                <div class="section-header" onclick="toggleSection('sec-opps')">
-                    <h2>🔥 Opportunities</h2>
-                    <span class="section-toggle">▼</span>
-                </div>
-                <div class="section-body">
-                    <!-- Desktop table header -->
-                    <div class="opp-table-header desktop-only">
-                        <span>Market</span><span>Gross</span><span>Fees</span><span>Net</span><span>Time</span><span>Signal</span>
-                    </div>
-                    <div id="opportunities" class="item-cards limited">
-                        <div class="empty-state">Scanning markets…</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Positions -->
+            <!-- ===== OPEN POSITIONS ===== -->
             <div class="section" id="sec-positions">
                 <div class="section-header" onclick="toggleSection('sec-positions')">
                     <h2>📂 Open Positions</h2>
                     <span class="section-toggle">▼</span>
                 </div>
                 <div class="section-body">
-                    <!-- Desktop table header -->
-                    <div class="pos-table-header desktop-only">
-                        <span>Market</span><span>Sides</span><span>Cost</span><span>Profit</span><span>Expires</span>
+                    <div class="table-header pos-cols desktop-only">
+                        <span>Market</span><span>Type</span><span>Cost</span><span>Spread</span><span>Exp Profit</span><span>Confidence</span><span>Expires</span>
                     </div>
                     <div id="positions" class="item-cards limited">
-                        <div class="empty-state">No positions — waiting for profitable spreads</div>
+                        <div class="empty-state">No open positions</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== TRADE HISTORY ===== -->
+            <div class="section" id="sec-trades">
+                <div class="section-header" onclick="toggleSection('sec-trades')">
+                    <h2>📋 Trade History</h2>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-body">
+                    <div class="table-header trade-cols desktop-only">
+                        <span>Time</span><span>Type</span><span>Market</span><span>Cost</span><span>Result</span><span>Strategy</span>
+                    </div>
+                    <div id="trades" class="item-cards limited">
+                        <div class="empty-state">No trades yet</div>
+                    </div>
+                    <!-- P&L Chart -->
+                    <div class="chart-container" id="pnl-chart-container" style="display:none">
+                        <div class="chart-label">Running P&L</div>
+                        <svg id="pnl-chart" viewBox="0 0 400 100" preserveAspectRatio="none"></svg>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Trade History -->
-        <div class="section" id="sec-trades">
-            <div class="section-header" onclick="toggleSection('sec-trades')">
-                <h2>📋 Trade History</h2>
+        <!-- ===== ALERTS ===== -->
+        <div class="section collapsed" id="sec-alerts">
+            <div class="section-header" onclick="toggleSection('sec-alerts')">
+                <h2>🔔 Alerts <span id="alert-badge" class="alert-badge" style="display:none">0</span></h2>
                 <span class="section-toggle">▼</span>
             </div>
             <div class="section-body">
-                <!-- Desktop table header -->
-                <div class="trade-table-header desktop-only">
-                    <span>Time</span><span>Type</span><span>Market</span><span>Cost</span><span>Fees</span><span>P&L</span>
+                <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;">
+                    <button onclick="clearAlerts()" class="small-btn">Clear</button>
+                    <span id="cb-status" class="cb-badge cb-ok">CB: OK</span>
                 </div>
-                <div id="trades" class="item-cards limited">
-                    <div class="empty-state">No trades yet — bot only enters when profitable after fees</div>
+                <div id="alert-feed" class="alert-feed">
+                    <div class="empty-state">No alerts yet</div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Bottom Bar -->
-    <div class="bottom-bar">
-        <span>Paper Trading · Resolution Arb</span>
-        <span id="last-update">Updated: —</span>
     </div>
 
     <script>
@@ -519,12 +616,11 @@
         let paused = false;
         let lastActivity = Date.now();
         const POLL_MS = 5000;
-        const IDLE_MS = 30000;
+        const IDLE_MS = 60000;
         const isDesktop = () => window.innerWidth > 768;
 
         // ===== SECTION COLLAPSE =====
         const collapsed = JSON.parse(localStorage.getItem('arb-collapsed') || '{}');
-
         function toggleSection(id) {
             const el = document.getElementById(id);
             if (!el) return;
@@ -533,8 +629,6 @@
             localStorage.setItem('arb-collapsed', JSON.stringify(collapsed));
         }
         window.toggleSection = toggleSection;
-
-        // Restore collapsed state
         Object.entries(collapsed).forEach(([id, val]) => {
             if (val) { const el = document.getElementById(id); if (el) el.classList.add('collapsed'); }
         });
@@ -550,9 +644,9 @@
                 stopPolling();
             } else {
                 markActive();
-                if (paused) return; // user must tap to resume
+                if (paused) return;
                 startPolling();
-                fetchAll(); // immediate refresh on return
+                fetchAll();
             }
         });
 
@@ -581,36 +675,35 @@
                 if (!paused) fetchAll();
             }, POLL_MS);
         }
-
         function stopPolling() {
             if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
 
         function showRefresh(show) {
             document.getElementById('refresh-bar').classList.toggle('active', show);
-            document.getElementById('refresh-toast').classList.toggle('visible', show);
         }
 
         async function fetchAll() {
             showRefresh(true);
             try {
-                const [portfolio, opps, crypto, chainlink, cbData] = await Promise.all([
+                const [portfolio, opps, crypto, chainlink, cbData, execConfig] = await Promise.all([
                     safeFetch('/api/portfolio'),
                     safeFetch('/api/opportunities'),
                     safeFetch('/api/crypto-speed'),
                     safeFetch('/api/chainlink'),
-                    safeFetch('/api/circuit-breaker')
+                    safeFetch('/api/circuit-breaker'),
+                    safeFetch('/api/execution-config')
                 ]);
+                if (execConfig) updateMode(execConfig);
                 if (portfolio) updatePortfolio(portfolio);
                 if (opps) updateOpportunities(opps.opportunities || opps);
                 if (crypto) updateCryptoSpeed(crypto);
                 if (chainlink) updateChainlink(chainlink);
                 detectChanges(portfolio, cbData);
-                document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
-            } catch (e) {
-                // silently skip
-            }
-            setTimeout(() => showRefresh(false), 400);
+                document.getElementById('last-update').textContent =
+                    'Updated ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+            } catch (e) { /* silently skip */ }
+            setTimeout(() => showRefresh(false), 300);
         }
 
         async function safeFetch(url) {
@@ -629,12 +722,24 @@
         window.manualRefresh = manualRefresh;
 
         // ===== HELPERS =====
-        function fmtPnl(val) {
-            const n = parseFloat(val) || 0;
+        function safe(val) {
+            if (val === null || val === undefined || val === '' || (typeof val === 'number' && isNaN(val))) return null;
+            const n = parseFloat(val);
+            return isNaN(n) ? null : n;
+        }
+        function fmtDollars(val) {
+            const n = safe(val);
+            if (n === null) return '—';
             return (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2);
         }
+        function fmtDollarsPlain(val) {
+            const n = safe(val);
+            if (n === null) return '—';
+            return '$' + Math.abs(n).toFixed(2);
+        }
         function pnlClass(val) {
-            const n = parseFloat(val) || 0;
+            const n = safe(val);
+            if (n === null) return '';
             return n >= 0 ? 'green' : 'red';
         }
         function timeLeft(expiresAt) {
@@ -643,13 +748,55 @@
             if (diff < 0) return 'Expired';
             if (diff < 3600000) return Math.ceil(diff / 60000) + 'm';
             if (diff < 86400000) return Math.ceil(diff / 3600000) + 'h';
-            const d = Math.ceil(diff / 86400000);
-            return d + 'd';
+            return Math.ceil(diff / 86400000) + 'd';
         }
         function esc(s) {
             const d = document.createElement('div');
             d.textContent = s || '';
             return d.innerHTML;
+        }
+        function formatUptime(startedAt) {
+            if (!startedAt) return '—';
+            const ms = Date.now() - new Date(startedAt).getTime();
+            if (ms < 0) return '—';
+            const h = Math.floor(ms / 3600000);
+            const m = Math.floor((ms % 3600000) / 60000);
+            if (h > 24) return Math.floor(h / 24) + 'd ' + (h % 24) + 'h';
+            return h + 'h ' + m + 'm';
+        }
+        function getTradeType(item) {
+            // Normalize trade type from various possible fields
+            const tt = item.tradeType || '';
+            const strat = item.strategy || '';
+            if (tt === 'cross_platform_arb' || strat === 'cross_platform') return 'xp-arb';
+            if (tt === 'crypto_speed' || strat === 'crypto_speed') return 'crypto-speed';
+            if (tt === 'combinatorial_speculative' || strat === 'combinatorial') return 'combo';
+            if (tt.includes('arb') || strat.includes('arb')) return 'xp-arb';
+            if (tt.includes('crypto') || strat.includes('crypto')) return 'crypto-speed';
+            if (tt.includes('combo') || strat.includes('combo')) return 'combo';
+            return 'unknown';
+        }
+        function typeBadgeHTML(typeKey) {
+            const labels = {
+                'xp-arb': 'XP Arb',
+                'crypto-speed': 'Crypto',
+                'combo': 'Combo ⚠',
+                'unknown': '?'
+            };
+            return '<span class="type-badge ' + typeKey + '">' + (labels[typeKey] || '?') + '</span>';
+        }
+        function confidenceLabel(typeKey) {
+            if (typeKey === 'xp-arb') return '<span class="confidence-tag">guaranteed</span>';
+            return '<span class="confidence-tag">estimated</span>';
+        }
+
+        // ===== UPDATE: MODE =====
+        function updateMode(config) {
+            const badge = document.getElementById('mode-badge');
+            if (!badge) return;
+            const isLive = config.mode === 'live' && !config.dryRun;
+            badge.textContent = isLive ? 'LIVE' : 'PAPER';
+            badge.className = 'mode-badge ' + (isLive ? 'live' : 'paper');
         }
 
         // ===== UPDATE: PORTFOLIO =====
@@ -662,18 +809,48 @@
                 if (cls !== undefined) el.className = 'val ' + cls;
             };
 
-            set('net-pnl', fmtPnl(p.netPnL), pnlClass(p.netPnL));
-            set('total-trades', p.totalTrades);
-            set('win-rate', p.winRate + '%');
-            set('open-positions', p.openPositions);
-            set('expected-profit', '+$' + (parseFloat(p.expectedProfit) || 0).toFixed(2));
-            set('total-value', '$' + p.totalValue);
-            set('gross-pnl', fmtPnl(p.grossPnL), pnlClass(p.grossPnL));
-            set('fees-paid', '$' + p.totalFeesPaid, 'red');
-            set('poly-balance', '$' + p.polyBalance);
-            set('kalshi-balance', '$' + p.kalshiBalance);
+            // Banner stats
+            set('bn-pnl', fmtDollars(p.netPnL), pnlClass(p.netPnL));
+            const wr = safe(p.winRate);
+            set('bn-winrate', wr !== null ? wr + '%' : '—');
+            set('bn-trades', p.totalTrades || '0');
+            set('bn-open', p.openPositions || '0');
+            set('bn-uptime', formatUptime(p.startedAt));
 
-            updatePositions(p.positions);
+            // Portfolio grid
+            set('poly-balance', fmtDollarsPlain(p.polyBalance));
+            set('kalshi-balance', fmtDollarsPlain(p.kalshiBalance));
+            set('deployed', fmtDollarsPlain(p.positionCost), 'blue');
+            set('available-cash', fmtDollarsPlain(p.totalCash));
+            set('total-value', fmtDollarsPlain(p.totalValue));
+            set('realized-pnl', fmtDollars(p.netPnL), pnlClass(p.netPnL));
+            set('unrealized-pnl', fmtDollars(p.expectedProfit), 'yellow');
+            set('fees-paid', fmtDollarsPlain(p.totalFeesPaid), 'red');
+
+            const best = safe(p.bestTrade);
+            const worst = safe(p.worstTrade);
+            set('best-trade', best !== null ? fmtDollars(best / 100) : '—', best !== null ? 'green' : '');
+            set('worst-trade', worst !== null ? fmtDollars(worst / 100) : '—', worst !== null ? 'red' : '');
+
+            // Trust Scorecard
+            const ts = p.trustScorecard;
+            if (ts) {
+                const ta = ts.trueArbs || {};
+                set('ta-resolved', ta.resolved || '0');
+                set('ta-open', ta.openPositions || '0');
+                set('ta-wl', (ta.wins || 0) + ' / ' + (ta.losses || 0));
+                set('ta-pnl', fmtDollars(ta.netPnL), pnlClass(ta.netPnL));
+                set('ta-avg', fmtDollars(ta.avgProfit));
+
+                const sp = ts.speculative || {};
+                set('ts-resolved', sp.resolved || '0');
+                set('ts-open', sp.openPositions || '0');
+                set('ts-wl', (sp.wins || 0) + ' / ' + (sp.losses || 0));
+                set('ts-pnl', fmtDollars(sp.netPnL), pnlClass(sp.netPnL));
+                set('ts-avg', fmtDollars(sp.avgProfit));
+            }
+
+            updatePositions(p.positions, ts?.positionsWithReasoning);
             updateTrades(p.recentTrades);
         }
 
@@ -681,82 +858,115 @@
         function updateOpportunities(opps) {
             const el = document.getElementById('opportunities');
             if (!opps?.length) {
-                el.innerHTML = '<div class="empty-state">Scanning markets…</div>';
+                el.innerHTML = '<div class="empty-state">No profitable spreads found — scanning…</div>';
                 return;
             }
 
             const desktop = isDesktop();
             el.innerHTML = opps.slice(0, 25).map(o => {
-                const gross = o.grossSpread ?? 0;
-                const fees = o.fees ?? 0;
-                const net = o.netProfit ?? (gross - fees);
+                const gross = safe(o.grossSpread) ?? 0;
+                const fees = safe(o.fees) ?? 0;
+                const net = safe(o.netProfit) ?? (gross - fees);
                 const signal = o.isProfitable ? 'arb' : (gross > 0 ? 'watch' : 'no');
-                const signalLabel = signal === 'arb' ? '✅ ARB' : signal === 'watch' ? '👀 Watch' : '✗';
+                const signalLabel = signal === 'arb' ? '✅ ARB' : signal === 'watch' ? '👀' : '—';
                 const netCls = net > 0 ? 'green' : net < -2 ? 'red' : 'yellow';
                 const grossCls = gross > 0 ? 'green' : 'red';
                 const tl = timeLeft(o.expiresAt);
 
                 if (desktop) {
-                    return `<div class="opp-table-row desktop-only">
-                        <span class="opp-name-cell">${esc(o.name)}</span>
-                        <span class="item-chip ${grossCls}" style="text-align:center">${gross.toFixed(1)}¢</span>
-                        <span style="color:#f87171;font-size:0.76rem">-${fees.toFixed(1)}¢</span>
-                        <span class="item-chip ${netCls}" style="text-align:center">${net.toFixed(1)}¢</span>
-                        <span style="color:#60a5fa;font-size:0.74rem">${tl}</span>
-                        <span><span class="badge ${signal}">${signalLabel}</span></span>
-                    </div>`;
+                    return '<div class="table-row opp-cols desktop-only">' +
+                        '<span class="cell-name">' + esc(o.name) + '</span>' +
+                        '<span class="item-chip ' + grossCls + '" style="text-align:center">' + gross.toFixed(1) + '¢</span>' +
+                        '<span style="color:#f87171;font-size:0.72rem">-' + fees.toFixed(1) + '¢</span>' +
+                        '<span class="item-chip ' + netCls + '" style="text-align:center">' + net.toFixed(1) + '¢</span>' +
+                        '<span style="color:#60a5fa;font-size:0.7rem">' + tl + '</span>' +
+                        '<span><span class="badge ' + signal + '">' + signalLabel + '</span></span>' +
+                    '</div>';
                 }
 
-                return `<div class="item-card mobile-only">
-                    <div class="item-card-name">${esc(o.name)}</div>
-                    <div class="item-card-row">
-                        <span class="item-chip ${grossCls}">Gross: ${gross.toFixed(1)}¢</span>
-                        <span class="item-chip red">Fees: -${fees.toFixed(1)}¢</span>
-                        <span class="item-chip ${netCls}">Net: ${net.toFixed(1)}¢</span>
-                    </div>
-                    <div class="item-card-row" style="margin-top:6px">
-                        <span class="item-chip blue">⏱ ${tl}</span>
-                        <span class="badge ${signal}">${signalLabel}</span>
-                    </div>
-                </div>`;
+                return '<div class="item-card mobile-only">' +
+                    '<div class="item-card-name">' + esc(o.name) + '</div>' +
+                    '<div class="item-card-row">' +
+                        '<span class="item-chip ' + grossCls + '">Gross ' + gross.toFixed(1) + '¢</span>' +
+                        '<span class="item-chip red">Fee -' + fees.toFixed(1) + '¢</span>' +
+                        '<span class="item-chip ' + netCls + '">Net ' + net.toFixed(1) + '¢</span>' +
+                    '</div>' +
+                    '<div class="item-card-row" style="margin-top:4px">' +
+                        '<span class="item-chip blue">⏱ ' + tl + '</span>' +
+                        '<span class="badge ' + signal + '">' + signalLabel + '</span>' +
+                    '</div>' +
+                '</div>';
             }).join('');
         }
 
         // ===== UPDATE: POSITIONS =====
-        function updatePositions(positions) {
+        function updatePositions(positions, positionsWithReasoning) {
             const el = document.getElementById('positions');
             if (!positions?.length) {
-                el.innerHTML = '<div class="empty-state">No positions — waiting for profitable spreads</div>';
+                el.innerHTML = '<div class="empty-state">No open positions</div>';
                 return;
             }
 
-            const desktop = isDesktop();
-            el.innerHTML = positions.map(pos => {
-                const cost = '$' + ((pos.totalCost || 0) / 100).toFixed(2);
-                const profit = '+$' + ((pos.expectedNetProfit || 0) / 100).toFixed(2);
-                const tl = timeLeft(pos.expiresAt);
+            // Build reasoning lookup
+            const reasoningMap = {};
+            if (positionsWithReasoning) {
+                positionsWithReasoning.forEach(p => {
+                    reasoningMap[p.name] = p;
+                });
+            }
 
-                if (desktop) {
-                    return `<div class="pos-table-row desktop-only">
-                        <span style="color:#c8c8e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(pos.name)}</span>
-                        <span style="font-size:0.76rem">P:${pos.polySide || '?'} K:${pos.kalshiSide || '?'}</span>
-                        <span>${cost}</span>
-                        <span style="color:#4ade80;font-weight:600">${profit}</span>
-                        <span style="color:#60a5fa;font-size:0.76rem">${tl}</span>
-                    </div>`;
+            const desktop = isDesktop();
+            el.innerHTML = positions.map((pos, i) => {
+                const typeKey = getTradeType(pos);
+                const cost = fmtDollarsPlain((pos.totalCost || 0) / 100);
+                const profit = fmtDollars((pos.expectedNetProfit || 0) / 100);
+                const tl = timeLeft(pos.expiresAt);
+                const spread = (pos.polySide && pos.kalshiSide)
+                    ? 'P:' + (pos.polySide || '?') + ' K:' + (pos.kalshiSide || '?')
+                    : (pos.polySide ? 'P:' + pos.polySide : (pos.kalshiSide ? 'K:' + pos.kalshiSide : '—'));
+                
+                const rInfo = reasoningMap[pos.name];
+                const reasoningId = 'reasoning-' + i;
+                let reasoningHTML = '';
+                if (rInfo && rInfo.reasoning) {
+                    const r = rInfo.reasoning;
+                    let details = '';
+                    if (typeof r === 'string') {
+                        details = esc(r);
+                    } else {
+                        details = Object.entries(r).map(([k,v]) => '<div>' + esc(k) + ': ' + esc(String(v)) + '</div>').join('');
+                    }
+                    reasoningHTML = '<div class="reasoning-toggle" onclick="document.getElementById(\'' + reasoningId + '\').classList.toggle(\'open\')">▸ reasoning</div>' +
+                        '<div class="reasoning-body" id="' + reasoningId + '">' + details + '</div>';
                 }
 
-                return `<div class="item-card mobile-only">
-                    <div class="item-card-name">${esc(pos.name)}</div>
-                    <div class="item-card-row">
-                        <span class="item-chip">P:${pos.polySide || '?'} K:${pos.kalshiSide || '?'}</span>
-                        <span class="item-chip">Cost: ${cost}</span>
-                    </div>
-                    <div class="item-card-row" style="margin-top:6px">
-                        <span class="item-chip green">Profit: ${profit}</span>
-                        <span class="item-chip blue">⏱ ${tl}</span>
-                    </div>
-                </div>`;
+                if (desktop) {
+                    return '<div class="table-row pos-cols desktop-only">' +
+                        '<span class="cell-name">' + esc(pos.name) + '</span>' +
+                        '<span>' + typeBadgeHTML(typeKey) + '</span>' +
+                        '<span>' + cost + '</span>' +
+                        '<span style="font-size:0.7rem;color:#999">' + spread + '</span>' +
+                        '<span style="color:#4ade80;font-weight:600">' + profit + '</span>' +
+                        '<span>' + confidenceLabel(typeKey) + '</span>' +
+                        '<span style="color:#60a5fa;font-size:0.72rem">' + tl + '</span>' +
+                    '</div>';
+                }
+
+                return '<div class="item-card mobile-only">' +
+                    '<div class="item-card-row" style="margin-bottom:4px">' +
+                        typeBadgeHTML(typeKey) + ' ' + confidenceLabel(typeKey) +
+                    '</div>' +
+                    '<div class="item-card-name">' + esc(pos.name) + '</div>' +
+                    '<div class="item-card-row">' +
+                        '<span class="item-chip">' + spread + '</span>' +
+                        '<span class="item-chip">Cost ' + cost + '</span>' +
+                    '</div>' +
+                    '<div class="item-card-row" style="margin-top:4px">' +
+                        '<span class="item-chip green">Exp ' + profit + '</span>' +
+                        '<span class="item-chip blue">⏱ ' + tl + '</span>' +
+                    '</div>' +
+                    reasoningHTML +
+                '</div>';
             }).join('');
         }
 
@@ -764,68 +974,124 @@
         function updateTrades(trades) {
             const el = document.getElementById('trades');
             if (!trades?.length) {
-                el.innerHTML = '<div class="empty-state">No trades yet — bot only enters when profitable after fees</div>';
+                el.innerHTML = '<div class="empty-state">No trades yet</div>';
+                document.getElementById('pnl-chart-container').style.display = 'none';
                 return;
             }
 
             const desktop = isDesktop();
-            el.innerHTML = trades.map(t => {
+            el.innerHTML = trades.slice(0, 20).map(t => {
                 const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) :
                              t.entryTime ? new Date(t.entryTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—';
                 const isEntry = t.type === 'ENTRY';
                 const isResolve = t.type === 'RESOLVE';
-                const typeLabel = isEntry ? 'BUY' : isResolve ? 'RESOLVE' : 'EXIT';
-                const typeCls = isEntry ? 'blue' : isResolve ? 'purple' : 'orange';
-                const cost = isEntry ? '$' + ((t.totalCost || 0) / 100).toFixed(2) : (t.payout ? '$' + (t.payout / 100).toFixed(2) : '—');
-                const fees = t.fees ? '$' + (t.fees / 100).toFixed(2) : '—';
-                const netPnl = t.netPnl ?? null;
-                const pnlStr = netPnl !== null ? fmtPnl(netPnl / 100) : (isEntry ? 'holding' : '—');
-                const pnlCls = netPnl > 0 ? 'green' : netPnl < 0 ? 'red' : '';
+                const typeLabel = isEntry ? 'BUY' : isResolve ? 'CLOSE' : 'EXIT';
+                const typeCls = isEntry ? 'blue' : isResolve ? 'purple' : 'green';
+                const cost = isEntry ? fmtDollarsPlain((t.totalCost || 0) / 100) : (t.payout ? fmtDollarsPlain(t.payout / 100) : '—');
+                const netPnl = safe(t.netPnl);
+                const resultStr = netPnl !== null ? fmtDollars(netPnl / 100) : (isEntry ? 'holding' : '—');
+                const resultCls = netPnl !== null ? pnlClass(netPnl) : '';
+                const typeKey = getTradeType(t);
 
                 if (desktop) {
-                    return `<div class="trade-table-row desktop-only">
-                        <span style="color:#555;font-family:monospace;font-size:0.74rem">${time}</span>
-                        <span class="item-chip ${typeCls}">${typeLabel}</span>
-                        <span style="color:#c8c8e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name)}</span>
-                        <span>${cost}</span>
-                        <span style="color:#f87171">${fees}</span>
-                        <span style="font-weight:600" class="${pnlCls}">${pnlStr}</span>
-                    </div>`;
+                    return '<div class="table-row trade-cols desktop-only">' +
+                        '<span style="color:#555;font-family:monospace;font-size:0.7rem">' + time + '</span>' +
+                        '<span class="item-chip ' + typeCls + '">' + typeLabel + '</span>' +
+                        '<span class="cell-name">' + esc(t.name) + '</span>' +
+                        '<span>' + cost + '</span>' +
+                        '<span class="' + resultCls + '" style="font-weight:600">' + resultStr + '</span>' +
+                        '<span>' + typeBadgeHTML(typeKey) + '</span>' +
+                    '</div>';
                 }
 
-                return `<div class="item-card mobile-only">
-                    <div class="item-card-row" style="margin-bottom:6px">
-                        <span class="item-chip" style="font-family:monospace">${time}</span>
-                        <span class="item-chip ${typeCls}">${typeLabel}</span>
-                    </div>
-                    <div class="item-card-name">${esc(t.name)}</div>
-                    <div class="item-card-row">
-                        <span class="item-chip">Cost: ${cost}</span>
-                        <span class="item-chip red">Fee: ${fees}</span>
-                        <span class="item-chip ${pnlCls || ''}">${pnlStr}</span>
-                    </div>
-                </div>`;
+                return '<div class="item-card mobile-only">' +
+                    '<div class="item-card-row" style="margin-bottom:4px">' +
+                        '<span class="item-chip" style="font-family:monospace">' + time + '</span>' +
+                        '<span class="item-chip ' + typeCls + '">' + typeLabel + '</span>' +
+                        typeBadgeHTML(typeKey) +
+                    '</div>' +
+                    '<div class="item-card-name">' + esc(t.name) + '</div>' +
+                    '<div class="item-card-row">' +
+                        '<span class="item-chip">Cost ' + cost + '</span>' +
+                        '<span class="item-chip ' + resultCls + '">' + resultStr + '</span>' +
+                    '</div>' +
+                '</div>';
             }).join('');
+
+            // P&L Chart
+            renderPnLChart(trades);
+        }
+
+        // ===== P&L CHART (SVG) =====
+        function renderPnLChart(trades) {
+            const container = document.getElementById('pnl-chart-container');
+            const svg = document.getElementById('pnl-chart');
+            if (!container || !svg) return;
+
+            // Get resolved trades with P&L (reverse to chronological order)
+            const resolved = trades.filter(t => safe(t.netPnl) !== null).reverse();
+            if (resolved.length < 2) {
+                container.style.display = 'none';
+                return;
+            }
+            container.style.display = 'block';
+
+            // Build running total
+            let running = 0;
+            const points = [0]; // start at 0
+            resolved.forEach(t => {
+                running += (t.netPnl || 0) / 100;
+                points.push(running);
+            });
+
+            const W = 400, H = 100, PAD = 8;
+            const minY = Math.min(0, ...points);
+            const maxY = Math.max(0, ...points);
+            const range = maxY - minY || 1;
+
+            const toX = (i) => PAD + (i / (points.length - 1)) * (W - PAD * 2);
+            const toY = (v) => PAD + (1 - (v - minY) / range) * (H - PAD * 2);
+
+            // Zero line
+            const zeroY = toY(0);
+            // Build path
+            const pathD = points.map((v, i) => (i === 0 ? 'M' : 'L') + toX(i).toFixed(1) + ',' + toY(v).toFixed(1)).join(' ');
+            // Fill area
+            const fillD = pathD + ' L' + toX(points.length - 1).toFixed(1) + ',' + zeroY.toFixed(1) +
+                ' L' + toX(0).toFixed(1) + ',' + zeroY.toFixed(1) + ' Z';
+
+            const lastVal = points[points.length - 1];
+            const color = lastVal >= 0 ? '#4ade80' : '#f87171';
+            const fillColor = lastVal >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)';
+
+            svg.innerHTML =
+                '<line x1="' + PAD + '" y1="' + zeroY.toFixed(1) + '" x2="' + (W - PAD) + '" y2="' + zeroY.toFixed(1) + '" stroke="#2a2a3a" stroke-width="0.5" stroke-dasharray="3,3"/>' +
+                '<path d="' + fillD + '" fill="' + fillColor + '"/>' +
+                '<path d="' + pathD + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round"/>' +
+                '<circle cx="' + toX(points.length - 1).toFixed(1) + '" cy="' + toY(lastVal).toFixed(1) + '" r="3" fill="' + color + '"/>' +
+                '<text x="' + (W - PAD) + '" y="' + (toY(lastVal) - 6).toFixed(1) + '" fill="' + color + '" font-size="9" text-anchor="end" font-weight="700">' + fmtDollars(lastVal) + '</text>';
         }
 
         // ===== UPDATE: CRYPTO SPEED =====
         function updateCryptoSpeed(data) {
             if (!data) return;
-            const snap = data.binance || data.coinbase || {};
+            const snap = data.binance || {};
 
             const formatPrice = (ticker, price) => {
-                if (!price) return '—';
-                if (ticker === 'SOL') return '$' + price.toFixed(2);
-                if (ticker === 'ETH') return '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                return '$' + price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+                const p = safe(price);
+                if (p === null) return '—';
+                if (ticker === 'SOL') return '$' + p.toFixed(2);
+                return '$' + p.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             };
 
             const formatMomentum = (m) => {
-                if (!m || m.direction === 'flat') return { text: 'FLAT', cls: '' };
-                const arrow = m.changePercent > 0 ? '↑' : '↓';
-                const pct = Math.abs(m.changePercent).toFixed(3);
-                const cls = m.changePercent > 0.15 ? 'green' : m.changePercent < -0.15 ? 'red' : 'yellow';
-                return { text: `${arrow} ${pct}%`, cls };
+                if (!m) return { text: '—', cls: '' };
+                const pct = safe(m.changePercent);
+                if (pct === null) return { text: 'FLAT', cls: 'yellow' };
+                const arrow = pct > 0 ? '↑' : pct < 0 ? '↓' : '→';
+                const absPct = Math.abs(pct).toFixed(3);
+                const cls = pct > 0.15 ? 'green' : pct < -0.15 ? 'red' : 'yellow';
+                return { text: arrow + ' ' + absPct + '%', cls };
             };
 
             for (const ticker of ['BTC', 'ETH', 'SOL']) {
@@ -842,14 +1108,20 @@
             }
 
             if (data.stats) {
-                const mkts = document.getElementById('cs-markets');
-                const sigs = document.getElementById('cs-signals');
-                if (mkts) mkts.textContent = data.stats.activeMarkets || 0;
-                if (sigs) sigs.textContent = data.stats.signals || 0;
-                const cbEl = document.getElementById('coinbase-status');
-                if (cbEl) {
-                    const dot = cbEl.querySelector('.dot');
-                    if (dot) dot.className = 'dot ' + (data.stats.binanceConnected ? 'green' : 'red');
+                const s = data.stats;
+                const setVal = (id, val) => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = safe(val) !== null ? val : '0';
+                };
+                setVal('cs-markets', s.activeMarkets);
+                setVal('cs-signals', s.signals);
+                setVal('cs-evals', s.evaluations);
+                setVal('cs-trades', s.trades);
+                // Update Binance status dot
+                const bEl = document.getElementById('binance-status');
+                if (bEl) {
+                    const dot = bEl.querySelector('.dot');
+                    if (dot) dot.className = 'dot ' + (s.binanceConnected ? 'green' : 'red');
                 }
             }
         }
@@ -861,112 +1133,74 @@
             const exPrice = document.getElementById('cl-exchange-price');
             const divEl = document.getElementById('cl-divergence');
             const statusEl = document.getElementById('cl-status');
-            const dotEl = document.getElementById('chainlink-status');
+            const dotEl = document.getElementById('chainlink-dot');
 
-            // Handle nested format: { prices: { BTC: { price } }, divergence: { BTC: { divergencePct } } }
-            const btcCl = data.prices?.BTC?.price || data.chainlinkPrice || data.btcPrice;
+            // API shape: { connected, prices: { BTC: { price } }, divergence: { BTC: { divergencePct, exchangePrice } } }
+            const btcData = data.prices?.BTC;
             const btcDiv = data.divergence?.BTC || {};
-            const btcExchange = btcDiv.exchangePrice || data.exchangePrice;
 
-            if (btcCl && !isNaN(btcCl)) {
-                if (clPrice) clPrice.textContent = '$' + parseFloat(btcCl).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-            } else {
-                if (clPrice) clPrice.textContent = '—';
-            }
-            if (btcExchange && !isNaN(btcExchange)) {
-                if (exPrice) exPrice.textContent = '$' + parseFloat(btcExchange).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            // Chainlink BTC price
+            const clBtc = safe(btcData?.price) ?? safe(data.chainlinkPrice) ?? safe(data.btcPrice);
+            if (clPrice) {
+                clPrice.textContent = clBtc !== null
+                    ? '$' + clBtc.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                    : '—';
             }
 
-            // Divergence — handle nested or flat format
-            const divPct = btcDiv.divergencePct ?? data.divergencePercent ?? data.divergence;
-            if (divPct !== undefined && divPct !== null && !isNaN(divPct)) {
-                const dp = Math.abs(parseFloat(divPct));
-                if (divEl) {
+            // Exchange BTC price
+            const exBtc = safe(btcDiv.exchangePrice) ?? safe(data.exchangePrice);
+            if (exPrice) {
+                exPrice.textContent = exBtc !== null
+                    ? '$' + exBtc.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                    : '—';
+            }
+
+            // Divergence — carefully check for NaN
+            const divPct = safe(btcDiv.divergencePct) ?? safe(data.divergencePercent);
+            if (divEl) {
+                if (divPct !== null) {
+                    const dp = Math.abs(divPct);
                     divEl.textContent = dp.toFixed(4) + '%';
                     divEl.className = 'val ' + (dp < 0.05 ? 'div-green' : dp < 0.1 ? 'div-yellow' : 'div-red');
+                } else {
+                    divEl.textContent = '—';
+                    divEl.className = 'val';
                 }
-            } else {
-                if (divEl) { divEl.textContent = '—'; divEl.className = 'val'; }
             }
-            if (data.connected !== undefined || data.status) {
-                const connected = data.connected ?? (data.status === 'connected');
-                if (statusEl) {
-                    statusEl.textContent = connected ? '● Connected' : '○ Disconnected';
-                    statusEl.className = 'val ' + (connected ? 'div-green' : 'div-red');
+
+            // Connection status
+            const connected = data.connected ?? (data.status === 'connected');
+            if (statusEl) {
+                if (connected === true) {
+                    statusEl.textContent = '● Live';
+                    statusEl.className = 'val div-green';
+                } else if (connected === false) {
+                    statusEl.textContent = '○ Offline';
+                    statusEl.className = 'val div-red';
+                } else {
+                    statusEl.textContent = '—';
+                    statusEl.className = 'val';
                 }
-                if (dotEl) {
-                    const dot = dotEl.querySelector('.dot');
-                    if (dot) dot.className = 'dot ' + (connected ? 'green' : 'red');
-                }
+            }
+            if (dotEl) {
+                const dot = dotEl.querySelector('.dot');
+                if (dot) dot.className = 'dot ' + (connected ? 'green' : 'red');
             }
         }
 
-        // ===== RESET =====
-        async function resetPortfolio() {
-            if (!confirm('Reset portfolio to $500/side?')) return;
-            try {
-                await fetch('/api/reset', { method: 'POST' });
-                await fetchAll();
-            } catch (e) { /* skip */ }
-        }
-        window.resetPortfolio = resetPortfolio;
-
-        // ===== HANDLE RESIZE (re-render with correct layout) =====
-        let lastWidth = window.innerWidth;
-        window.addEventListener('resize', () => {
-            const crossed = (lastWidth <= 768 && window.innerWidth > 768) || (lastWidth > 768 && window.innerWidth <= 768);
-            lastWidth = window.innerWidth;
-            if (crossed) fetchAll(); // re-render with correct layout
-        });
-
-        // ===== NOTIFICATION & ALERT SYSTEM =====
-        let notifyPermission = Notification?.permission || 'default';
+        // ===== ALERT SYSTEM =====
         const alertHistory = JSON.parse(localStorage.getItem('arb-alerts') || '[]').slice(0, 100);
         let lastTradeCount = null;
         let lastCBState = null;
         let alertUnread = 0;
 
-        function updateNotifyBtn() {
-            const btn = document.getElementById('notify-btn');
-            if (!btn) return;
-            if (notifyPermission === 'granted') {
-                btn.textContent = '🔔 Push On';
-                btn.classList.add('enabled');
-            } else if (notifyPermission === 'denied') {
-                btn.textContent = '🔕 Blocked';
-                btn.disabled = true;
-            }
-        }
-        updateNotifyBtn();
-
-        function requestNotifyPermission() {
-            if (!('Notification' in window)) { alert('Notifications not supported'); return; }
-            Notification.requestPermission().then(p => {
-                notifyPermission = p;
-                updateNotifyBtn();
-                if (p === 'granted') addAlert('info', 'Push notifications enabled — you\'ll get alerts even when the tab is in the background');
-            });
-        }
-        window.requestNotifyPermission = requestNotifyPermission;
-
-        function sendNotification(title, body, tag) {
-            if (notifyPermission !== 'granted') return;
-            if (document.hasFocus()) return; // don't notify when looking at dashboard
-            try {
-                const n = new Notification(title, {
-                    body, tag, icon: '🎯',
-                    badge: '🎯',
-                    vibrate: [200, 100, 200],
-                    requireInteraction: false,
-                });
-                setTimeout(() => n.close(), 10000);
-            } catch (e) { /* Safari doesn't support all options */ }
-        }
-
         function addAlert(level, message) {
             const now = new Date();
-            const entry = { level, message, time: now.toISOString(), timeStr: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) };
-            alertHistory.unshift(entry);
+            alertHistory.unshift({
+                level, message,
+                time: now.toISOString(),
+                timeStr: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+            });
             if (alertHistory.length > 100) alertHistory.length = 100;
             localStorage.setItem('arb-alerts', JSON.stringify(alertHistory));
             alertUnread++;
@@ -981,12 +1215,13 @@
             } else {
                 feed.innerHTML = alertHistory.slice(0, 50).map(a => {
                     const icon = a.level === 'critical' ? '🚨' : a.level === 'warn' ? '⚠️' : 'ℹ️';
-                    const cls = a.level || 'info';
-                    const msg = (a.message || '').replace(/</g, '&lt;');
-                    return '<div class="alert-item ' + cls + '"><span class="alert-time">' + (a.timeStr || '') + '</span><span class="alert-icon">' + icon + '</span><span class="alert-msg">' + msg + '</span></div>';
+                    return '<div class="alert-item ' + (a.level || 'info') + '">' +
+                        '<span class="alert-time">' + (a.timeStr || '') + '</span>' +
+                        '<span>' + icon + '</span>' +
+                        '<span class="alert-msg">' + (a.message || '').replace(/</g, '&lt;') + '</span>' +
+                    '</div>';
                 }).join('');
             }
-            // Badge
             const badge = document.getElementById('alert-badge');
             if (badge) {
                 if (alertUnread > 0) { badge.textContent = alertUnread; badge.style.display = 'inline'; }
@@ -1003,39 +1238,38 @@
         }
         window.clearAlerts = clearAlerts;
 
-        // Detect changes between polls to generate alerts
         function detectChanges(portfolio, cbData) {
             if (!portfolio) return;
             const trades = parseInt(portfolio.totalTrades) || 0;
-
-            // New trade detected
             if (lastTradeCount !== null && trades > lastTradeCount) {
                 const diff = trades - lastTradeCount;
-                const pnl = portfolio.netPnL;
-                const msg = diff + ' new trade' + (diff > 1 ? 's' : '') + ' — P&L: $' + pnl + ' | Open: ' + portfolio.openPositions;
-                addAlert('info', '📈 ' + msg);
-                sendNotification('Arb Bot Trade', msg, 'trade-' + trades);
+                addAlert('info', '📈 ' + diff + ' new trade(s) — P&L: $' + (portfolio.netPnL || '0.00'));
             }
             lastTradeCount = trades;
 
-            // Circuit breaker state change
             if (cbData) {
                 const tripped = cbData.isTripped;
                 const cbEl = document.getElementById('cb-status');
                 if (cbEl) {
-                    cbEl.textContent = tripped ? '🛑 CB: TRIPPED' : 'CB: OK';
+                    cbEl.textContent = tripped ? '🛑 CB TRIPPED' : 'CB: OK';
                     cbEl.className = 'cb-badge ' + (tripped ? 'cb-tripped' : 'cb-ok');
                 }
                 if (lastCBState !== null && tripped && !lastCBState) {
                     addAlert('critical', '🛑 Circuit breaker tripped: ' + (cbData.tripReason || 'unknown'));
-                    sendNotification('⚠️ Circuit Breaker', 'Trading halted: ' + (cbData.tripReason || 'unknown'), 'cb-trip');
                 } else if (lastCBState !== null && !tripped && lastCBState) {
-                    addAlert('info', '✅ Circuit breaker reset — trading resumed');
-                    sendNotification('Circuit Breaker Reset', 'Trading resumed', 'cb-reset');
+                    addAlert('info', '✅ Circuit breaker reset');
                 }
                 lastCBState = tripped;
             }
         }
+
+        // ===== RESIZE HANDLER =====
+        let lastWidth = window.innerWidth;
+        window.addEventListener('resize', () => {
+            const crossed = (lastWidth <= 768 && window.innerWidth > 768) || (lastWidth > 768 && window.innerWidth <= 768);
+            lastWidth = window.innerWidth;
+            if (crossed) fetchAll();
+        });
 
         // ===== INIT =====
         fetchAll();
