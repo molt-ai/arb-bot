@@ -1,6 +1,6 @@
 /**
- * Paper Trading Engine v2
- * Realistic fee model + resolution-based arb
+ * Paper Trading Engine v3 — Trust Edition
+ * Realistic fee model + resolution-based arb + honest trade classification
  * 
  * HOW PREDICTION MARKET ARB WORKS:
  * - Buy YES on Platform A + NO on Platform B
@@ -8,6 +8,13 @@
  * - At resolution, ONE side pays $1 guaranteed
  * - Profit = 100¢ - totalCost - fees (regardless of outcome)
  * - HOLD TO RESOLUTION — don't flip on price swings
+ * 
+ * TRADE TYPES:
+ * - 'cross_platform_arb': TRUE arb — same market on Poly + Kalshi, buy+sell < $1
+ *   → Guaranteed profit regardless of outcome. This is real arbitrage.
+ * - 'combinatorial_speculative': Single-platform bet based on detected relationships
+ *   → NOT guaranteed. Depends on entity matcher accuracy & market independence.
+ *   → Labeled clearly as speculative. Track separately.
  * 
  * STORAGE: SQLite (primary) with JSON fallback
  */
@@ -294,7 +301,75 @@ export class PaperTrader {
     }
 
     /**
+     * Classify a trade as true arb vs speculative
+     * @returns {'cross_platform_arb' | 'combinatorial_speculative'}
+     */
+    classifyTrade(opportunity) {
+        const { strategy, polyYes, polyNo, kalshiYes, kalshiNo } = opportunity;
+        
+        // True cross-platform arb: both sides have real prices on different platforms
+        const hasPolyPrice = (strategy === 1 ? polyYes : polyNo) > 0;
+        const hasKalshiPrice = (strategy === 1 ? kalshiNo : kalshiYes) > 0;
+        
+        if (hasPolyPrice && hasKalshiPrice) {
+            return 'cross_platform_arb';
+        }
+        return 'combinatorial_speculative';
+    }
+
+    /**
+     * Validate a cross-platform arb trade
+     * Core check: buyPrice + sellPrice < 100 (after fees)
+     * If not, it's not a real arb — reject it.
+     */
+    validateCrossPlatformArb(polyPrice, kalshiPrice, opts = {}) {
+        const totalCost = polyPrice + kalshiPrice;
+        const fees = this.calcFees(polyPrice, kalshiPrice, opts);
+        const netProfit = 100 - totalCost - fees;
+        
+        if (totalCost >= 100) {
+            return { valid: false, reason: `Total cost ${totalCost}¢ >= 100¢ — not an arb` };
+        }
+        if (netProfit < this.minNetProfit) {
+            return { valid: false, reason: `Net profit ${netProfit.toFixed(2)}¢ < min ${this.minNetProfit}¢ after ${fees.toFixed(2)}¢ fees` };
+        }
+        return { valid: true, netProfit, fees, totalCost };
+    }
+
+    /**
+     * Log full trade reasoning before execution
+     */
+    logTradeReasoning(opportunity, tradeType, validation) {
+        const { name, strategy, polyYes, polyNo, kalshiYes, kalshiNo } = opportunity;
+        const polyPrice = strategy === 1 ? polyYes : polyNo;
+        const kalshiPrice = strategy === 1 ? kalshiNo : kalshiYes;
+        const polySide = strategy === 1 ? 'YES' : 'NO';
+        const kalshiSide = strategy === 1 ? 'NO' : 'YES';
+
+        console.log(`\n${'='.repeat(70)}`);
+        console.log(`📋 TRADE REASONING — ${tradeType.toUpperCase()}`);
+        console.log(`${'='.repeat(70)}`);
+        console.log(`  Market: ${name}`);
+        console.log(`  Type: ${tradeType}`);
+        console.log(`  Strategy: Buy Poly ${polySide} @ ${polyPrice}¢ + Kalshi ${kalshiSide} @ ${kalshiPrice}¢`);
+        console.log(`  Total cost: ${polyPrice + kalshiPrice}¢ per contract`);
+        
+        if (tradeType === 'cross_platform_arb') {
+            console.log(`  ✅ TRUE ARB: Same market on both platforms`);
+            console.log(`  Guaranteed payout: 100¢ per contract at resolution`);
+            console.log(`  Gross spread: ${100 - polyPrice - kalshiPrice}¢`);
+            console.log(`  Fees: ${validation.fees?.toFixed(2) || '?'}¢`);
+            console.log(`  Net profit: ${validation.netProfit?.toFixed(2) || '?'}¢ per contract`);
+        } else {
+            console.log(`  ⚠️  SPECULATIVE: Single-platform or unverified relationship`);
+            console.log(`  NOT guaranteed profit — depends on market outcome`);
+        }
+        console.log(`${'='.repeat(70)}\n`);
+    }
+
+    /**
      * Execute a paper trade — only if profitable after fees on resolution
+     * Now with trade classification and validation
      */
     executeTrade(opportunity) {
         const { name, strategy, polyYes, polyNo, kalshiYes, kalshiNo, expiresAt } = opportunity;
@@ -311,6 +386,24 @@ export class PaperTrader {
 
         // Skip if either price is 0 or near-0 (no real liquidity)
         if (polyPrice <= 2 || kalshiPrice <= 2) return null;
+
+        // Classify the trade
+        const tradeType = this.classifyTrade(opportunity);
+
+        // Validate cross-platform arbs strictly
+        if (tradeType === 'cross_platform_arb') {
+            const validation = this.validateCrossPlatformArb(polyPrice, kalshiPrice);
+            if (!validation.valid) {
+                console.log(`[PAPER-TRADER] ❌ REJECTED ${name}: ${validation.reason}`);
+                return null;
+            }
+            // Log full reasoning for valid arbs
+            this.logTradeReasoning(opportunity, tradeType, validation);
+        } else {
+            // Speculative trades get a warning — we still track them but label clearly
+            console.log(`[PAPER-TRADER] ⚠️  SPECULATIVE trade detected: ${name}`);
+            console.log(`[PAPER-TRADER]    This is NOT a guaranteed arb. Tracking for analysis only.`);
+        }
 
         // Check if profitable after fees (resolution arb math)
         const arb = this.calcResolutionProfit(polyPrice, kalshiPrice);
@@ -336,6 +429,7 @@ export class PaperTrader {
         const position = {
             id: `t-${Date.now()}`,
             name,
+            tradeType,  // NEW: 'cross_platform_arb' or 'combinatorial_speculative'
             strategy,
             polySide,
             kalshiSide,
@@ -348,7 +442,15 @@ export class PaperTrader {
             expectedNetProfit: arb.netProfit * this.contractSize,
             expiresAt: expiresAt || null,
             entryTime: now.toISOString(),
-            entryTimestamp: Date.now()
+            entryTimestamp: Date.now(),
+            reasoning: {
+                type: tradeType,
+                polyMarket: `${polySide} @ ${polyPrice}¢ on Polymarket`,
+                kalshiMarket: `${kalshiSide} @ ${kalshiPrice}¢ on Kalshi`,
+                totalCostCents: polyPrice + kalshiPrice,
+                guaranteedPayout: tradeType === 'cross_platform_arb' ? '100¢ at resolution' : 'NOT guaranteed',
+                feeBreakdown: arb.feeBreakdown,
+            }
         };
 
         this.state.positions.push(position);
@@ -362,20 +464,44 @@ export class PaperTrader {
 
     /**
      * Simulate resolution of a position
-     * In real arb: one side pays $1, other pays $0
-     * Since we don't know outcome, simulate both and take guaranteed profit
+     * 
+     * For cross_platform_arb: one side pays $1, guaranteed profit.
+     * For combinatorial_speculative: we DON'T know the outcome. 
+     *   We simulate a 50/50 coin flip to be honest about uncertainty.
+     *   This prevents fake P&L inflation from speculative trades.
      */
-    resolvePosition(name) {
+    resolvePosition(name, opts = {}) {
         const posIdx = this.state.positions.findIndex(p => p.name === name);
         if (posIdx === -1) return null;
 
         const pos = this.state.positions[posIdx];
+        const tradeType = pos.tradeType || (pos.strategy === 'combinatorial' ? 'combinatorial_speculative' : 'cross_platform_arb');
         
-        // Guaranteed payout = 100¢ per contract (one side wins)
-        const payout = 100 * pos.contracts;
-        const fees = pos.fees;
-        const grossPnl = payout - pos.totalCost;
-        const netPnl = grossPnl - fees;
+        let payout, fees, grossPnl, netPnl;
+        
+        if (tradeType === 'cross_platform_arb') {
+            // TRUE ARB: Guaranteed payout = 100¢ per contract (one side wins)
+            payout = 100 * pos.contracts;
+            fees = pos.fees;
+            grossPnl = payout - pos.totalCost;
+            netPnl = grossPnl - fees;
+            console.log(`[PAPER-TRADER] ✅ Resolving TRUE ARB: ${name} | Guaranteed +$${(netPnl/100).toFixed(2)}`);
+        } else {
+            // SPECULATIVE: If forced resolution provided (outcome known), use it
+            if (opts.outcome === 'win') {
+                payout = 100 * pos.contracts;
+            } else if (opts.outcome === 'loss') {
+                payout = 0;
+            } else {
+                // Unknown outcome — simulate 50/50 to be honest
+                // This means speculative trades contribute ~zero expected P&L over time
+                payout = Math.random() < 0.5 ? (100 * pos.contracts) : 0;
+                console.log(`[PAPER-TRADER] 🎲 Resolving SPECULATIVE: ${name} | Simulated ${payout > 0 ? 'WIN' : 'LOSS'} (50/50 coin flip — outcome unknown)`);
+            }
+            fees = pos.fees;
+            grossPnl = payout - pos.totalCost;
+            netPnl = grossPnl - fees;
+        }
 
         // Return payout to balances (split evenly for simplicity)
         this.state.polyBalance += Math.floor(payout / 2);
@@ -400,6 +526,7 @@ export class PaperTrader {
             id: pos.id,
             name,
             type: 'RESOLVE',
+            tradeType,
             polySide: pos.polySide,
             kalshiSide: pos.kalshiSide,
             contracts: pos.contracts,
@@ -408,7 +535,7 @@ export class PaperTrader {
             fees,
             grossPnl,
             netPnl,
-            holdTime: Date.now() - pos.entryTimestamp,
+            holdTime: Date.now() - (pos.entryTimestamp || Date.parse(pos.entryTime)),
             exitTime: now.toISOString(),
             timestamp: now.toISOString()
         };
@@ -487,7 +614,8 @@ export class PaperTrader {
 
     /**
      * Check exits — for resolution arb, we HOLD positions.
-     * Auto-resolve expired positions (simulate platform payout).
+     * Only auto-resolve TRUE ARBS after expiry (guaranteed payout).
+     * Speculative trades are left for auto-redeemer to verify.
      * Only exit early if spread has massively reversed (stop-loss).
      */
     checkExits(currentOpportunities) {
@@ -495,37 +623,50 @@ export class PaperTrader {
         const now = Date.now();
 
         for (const pos of [...this.state.positions]) {
-            // AUTO-RESOLVE: if position has expired, simulate resolution payout
-            if (pos.expiresAt) {
+            const tradeType = pos.tradeType || (pos.strategy === 'combinatorial' ? 'combinatorial_speculative' : 'cross_platform_arb');
+
+            // AUTO-RESOLVE: only for TRUE ARBS after expiry
+            if (pos.expiresAt && tradeType === 'cross_platform_arb') {
                 const expiryTime = new Date(pos.expiresAt).getTime();
                 // Give 2 minutes grace period after expiry for resolution
                 if (expiryTime > 0 && now > expiryTime + 2 * 60 * 1000) {
                     const trade = this.resolvePosition(pos.name);
                     if (trade) {
-                        console.log(`🏁 AUTO-RESOLVED: ${pos.name} | Net: ${trade.netPnl >= 0 ? '+' : ''}$${(trade.netPnl/100).toFixed(2)}`);
+                        console.log(`🏁 AUTO-RESOLVED (TRUE ARB): ${pos.name} | Net: ${trade.netPnl >= 0 ? '+' : ''}$${(trade.netPnl/100).toFixed(2)}`);
                         closedTrades.push(trade);
                     }
                     continue;
                 }
             }
 
-            // Stop-loss check for non-expired positions
-            const opp = currentOpportunities.find(o => o.name === pos.name);
-            if (opp) {
-                let currentTotal;
-                if (pos.polySide === 'YES') {
-                    currentTotal = opp.polyYes + opp.kalshiNo;
-                } else if (pos.polySide === 'YES+NO') {
-                    // Same-market arb — no stop-loss needed, hold to resolution
+            // For speculative trades past expiry — log but DON'T auto-resolve
+            if (pos.expiresAt && tradeType === 'combinatorial_speculative') {
+                const expiryTime = new Date(pos.expiresAt).getTime();
+                if (expiryTime > 0 && now > expiryTime + 2 * 60 * 1000) {
+                    // Leave for auto-redeemer to handle with proper verification
                     continue;
-                } else {
-                    currentTotal = opp.polyNo + opp.kalshiYes;
                 }
-                
-                // Stop-loss: if current prices imply > 5¢ loss per contract
-                if (currentTotal > 105) {
-                    const trade = this.closePositionEarly(pos.name, opp);
-                    if (trade) closedTrades.push(trade);
+            }
+
+            // Stop-loss check for cross-platform arb positions only
+            if (tradeType === 'cross_platform_arb') {
+                const opp = currentOpportunities.find(o => o.name === pos.name);
+                if (opp) {
+                    let currentTotal;
+                    if (pos.polySide === 'YES') {
+                        currentTotal = opp.polyYes + opp.kalshiNo;
+                    } else if (pos.polySide === 'YES+NO') {
+                        // Same-market arb — no stop-loss needed, hold to resolution
+                        continue;
+                    } else {
+                        currentTotal = opp.polyNo + opp.kalshiYes;
+                    }
+                    
+                    // Stop-loss: if current prices imply > 5¢ loss per contract
+                    if (currentTotal > 105) {
+                        const trade = this.closePositionEarly(pos.name, opp);
+                        if (trade) closedTrades.push(trade);
+                    }
                 }
             }
         }
@@ -541,6 +682,55 @@ export class PaperTrader {
         const expectedProfit = this.state.positions.reduce((s, p) => s + (p.expectedNetProfit || 0), 0);
         const totalValue = totalCash + expectedPayout;
         const initialTotal = this.initialBalance * 200;
+
+        // Trust Scorecard — break down by trade type
+        const resolvedTrades = this.trades.filter(t => t.type === 'RESOLVE' || t.type === 'EARLY_EXIT');
+        const trueArbs = resolvedTrades.filter(t => t.tradeType === 'cross_platform_arb');
+        const specTrades = resolvedTrades.filter(t => t.tradeType === 'combinatorial_speculative' || t.tradeType === undefined);
+        
+        const openArbs = this.state.positions.filter(p => p.tradeType === 'cross_platform_arb');
+        const openSpec = this.state.positions.filter(p => 
+            p.tradeType === 'combinatorial_speculative' || p.strategy === 'combinatorial'
+        );
+
+        const arbPnl = trueArbs.reduce((s, t) => s + (t.netPnl || 0), 0);
+        const specPnl = specTrades.reduce((s, t) => s + (t.netPnl || 0), 0);
+
+        const trustScorecard = {
+            summary: 'Honest breakdown of paper trading performance',
+            trueArbs: {
+                resolved: trueArbs.length,
+                openPositions: openArbs.length,
+                netPnL: (arbPnl / 100).toFixed(2),
+                wins: trueArbs.filter(t => (t.netPnl || 0) > 0).length,
+                losses: trueArbs.filter(t => (t.netPnl || 0) <= 0).length,
+                avgProfit: trueArbs.length > 0 ? ((arbPnl / trueArbs.length) / 100).toFixed(2) : '0.00',
+                label: '✅ Guaranteed arb — buy+sell on different platforms < $1',
+            },
+            speculative: {
+                resolved: specTrades.length,
+                openPositions: openSpec.length,
+                netPnL: (specPnl / 100).toFixed(2),
+                wins: specTrades.filter(t => (t.netPnl || 0) > 0).length,
+                losses: specTrades.filter(t => (t.netPnl || 0) <= 0).length,
+                avgProfit: specTrades.length > 0 ? ((specPnl / specTrades.length) / 100).toFixed(2) : '0.00',
+                label: '⚠️ Speculative — single-platform combo bets, NOT guaranteed',
+            },
+            largestLoss: resolvedTrades.length > 0
+                ? (Math.min(...resolvedTrades.map(t => t.netPnl || 0)) / 100).toFixed(2)
+                : '0.00',
+            positionsWithReasoning: this.state.positions.map(p => ({
+                name: p.name,
+                tradeType: p.tradeType || (p.strategy === 'combinatorial' ? 'combinatorial_speculative' : 'cross_platform_arb'),
+                reasoning: p.reasoning || {
+                    type: p.tradeType || 'unknown',
+                    polyMarket: `${p.polySide} @ ${p.polyPrice}¢`,
+                    kalshiMarket: p.kalshiSide ? `${p.kalshiSide} @ ${p.kalshiPrice}¢` : 'none',
+                },
+                expectedProfit: ((p.expectedNetProfit || 0) / 100).toFixed(2),
+                expiresAt: p.expiresAt,
+            })),
+        };
 
         return {
             polyBalance: (this.state.polyBalance / 100).toFixed(2),
@@ -565,7 +755,8 @@ export class PaperTrader {
             bestTrade: this.state.bestTrade,
             worstTrade: this.state.worstTrade,
             startedAt: this.state.startedAt,
-            recentTrades: this.trades.slice(-30).reverse()
+            recentTrades: this.trades.slice(-30).reverse(),
+            trustScorecard,
         };
     }
 

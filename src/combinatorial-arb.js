@@ -570,6 +570,7 @@ export class CombinatorialArb {
             this.trader.state.positions.push({
                 id: `combo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 name: `${name} | ${b.label}`,
+                tradeType: 'combinatorial_speculative',  // HONEST: these are NOT guaranteed arbs
                 strategy: 'combinatorial',
                 oppKey,
                 polySide: b.side,
@@ -587,6 +588,15 @@ export class CombinatorialArb {
                 // Combo-specific metadata
                 oppType: opp.type,
                 confidence: opp.confidence,
+                reasoning: {
+                    type: 'combinatorial_speculative',
+                    warning: '⚠️ NOT a guaranteed arb. Single-platform speculative bet.',
+                    relationship: opp.relationship || opp.type,
+                    action: opp.action,
+                    reason: opp.reason,
+                    matchScore: opp.matchScore,
+                    confidence: opp.confidence,
+                },
             });
         }
         
@@ -609,8 +619,11 @@ export class CombinatorialArb {
         this.trader.save();
         this.stats.trades++;
         
-        console.log(`[COMBO-ARB] 📊 Paper trade: ${name} (${buys.length} positions)`);
-        console.log(`  ${opp.action}`);
+        console.log(`[COMBO-ARB] 📊 SPECULATIVE paper trade: ${name} (${buys.length} positions)`);
+        console.log(`  ⚠️  WARNING: This is NOT a guaranteed arb — single-platform speculative bet`);
+        console.log(`  Action: ${opp.action}`);
+        console.log(`  Reason: ${opp.reason}`);
+        console.log(`  Confidence: ${(opp.confidence * 100).toFixed(0)}% | Match score: ${(opp.matchScore * 100).toFixed(0)}%`);
     }
 
     /**
