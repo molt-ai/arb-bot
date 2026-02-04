@@ -863,26 +863,30 @@
             const statusEl = document.getElementById('cl-status');
             const dotEl = document.getElementById('chainlink-status');
 
-            if (data.btcPrice || data.chainlinkPrice) {
-                const price = data.chainlinkPrice || data.btcPrice;
-                if (clPrice) clPrice.textContent = '$' + parseFloat(price).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            // Handle nested format: { prices: { BTC: { price } }, divergence: { BTC: { divergencePct } } }
+            const btcCl = data.prices?.BTC?.price || data.chainlinkPrice || data.btcPrice;
+            const btcDiv = data.divergence?.BTC || {};
+            const btcExchange = btcDiv.exchangePrice || data.exchangePrice;
+
+            if (btcCl && !isNaN(btcCl)) {
+                if (clPrice) clPrice.textContent = '$' + parseFloat(btcCl).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            } else {
+                if (clPrice) clPrice.textContent = '—';
             }
-            if (data.exchangePrice) {
-                if (exPrice) exPrice.textContent = '$' + parseFloat(data.exchangePrice).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            if (btcExchange && !isNaN(btcExchange)) {
+                if (exPrice) exPrice.textContent = '$' + parseFloat(btcExchange).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             }
-            if (data.divergence !== undefined && data.divergence !== null) {
-                const div = Math.abs(parseFloat(data.divergence));
-                const divPct = (typeof data.divergencePercent === 'number') ? data.divergencePercent : div;
-                if (divEl) {
-                    divEl.textContent = divPct.toFixed(4) + '%';
-                    divEl.className = 'val ' + (divPct < 0.05 ? 'div-green' : divPct < 0.1 ? 'div-yellow' : 'div-red');
-                }
-            } else if (data.divergencePercent !== undefined) {
-                const dp = Math.abs(parseFloat(data.divergencePercent));
+
+            // Divergence — handle nested or flat format
+            const divPct = btcDiv.divergencePct ?? data.divergencePercent ?? data.divergence;
+            if (divPct !== undefined && divPct !== null && !isNaN(divPct)) {
+                const dp = Math.abs(parseFloat(divPct));
                 if (divEl) {
                     divEl.textContent = dp.toFixed(4) + '%';
                     divEl.className = 'val ' + (dp < 0.05 ? 'div-green' : dp < 0.1 ? 'div-yellow' : 'div-red');
                 }
+            } else {
+                if (divEl) { divEl.textContent = '—'; divEl.className = 'val'; }
             }
             if (data.connected !== undefined || data.status) {
                 const connected = data.connected ?? (data.status === 'connected');

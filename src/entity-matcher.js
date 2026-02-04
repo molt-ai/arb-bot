@@ -439,6 +439,76 @@ function extractStructure(text) {
         }
     }
 
+    // ── Sports / Player Props Detection ──
+    // Detect stat categories: points, rebounds, assists, touchdowns, yards, etc.
+    const SPORT_STATS = {
+        'points': 'points', 'pts': 'points', 'point': 'points',
+        'rebounds': 'rebounds', 'rebs': 'rebounds', 'rebound': 'rebounds',
+        'assists': 'assists', 'ast': 'assists', 'assist': 'assists',
+        'steals': 'steals', 'stl': 'steals', 'steal': 'steals',
+        'blocks': 'blocks_stat', 'blk': 'blocks_stat',  // disambiguate from "block" action
+        'turnovers': 'turnovers', 'tov': 'turnovers', 'turnover': 'turnovers',
+        'three-pointers': 'threes', 'threes': 'threes', '3-pointers': 'threes', '3pm': 'threes',
+        'touchdowns': 'touchdowns', 'tds': 'touchdowns', 'td': 'touchdowns',
+        'passing yards': 'passing_yards', 'rush yards': 'rushing_yards',
+        'rushing yards': 'rushing_yards', 'receiving yards': 'receiving_yards',
+        'yards': 'yards',
+        'goals': 'goals', 'goal': 'goals',
+        'saves': 'saves', 'save': 'saves',
+        'hits': 'hits', 'hit': 'hits',
+        'strikeouts': 'strikeouts', 'ks': 'strikeouts',
+        'home runs': 'home_runs', 'hrs': 'home_runs', 'hr': 'home_runs',
+        'runs': 'runs', 'rbis': 'rbis', 'rbi': 'rbis',
+        'tweets': 'tweets', 'tweet': 'tweets', 'posts': 'posts',
+    };
+
+    // Detect bet type
+    const SPORT_BET_TYPES = {
+        'o/u': 'over_under', 'over/under': 'over_under', 'over under': 'over_under',
+        'total': 'total', 'team total': 'team_total',
+        'moneyline': 'moneyline', 'money line': 'moneyline',
+        'spread': 'spread', 'handicap': 'spread',
+        'winner': 'moneyline',
+    };
+
+    // Extract stat category
+    for (const [phrase, stat] of Object.entries(SPORT_STATS)) {
+        if (norm.includes(phrase)) {
+            result.sportStat = stat;
+            if (result.domain === 'unknown') result.domain = 'sports';
+            break;
+        }
+    }
+
+    // Extract bet type
+    for (const [phrase, betType] of Object.entries(SPORT_BET_TYPES)) {
+        if (norm.includes(phrase)) {
+            result.sportBetType = betType;
+            if (result.domain === 'unknown') result.domain = 'sports';
+            break;
+        }
+    }
+
+    // Detect O/U threshold (e.g., "O/U 8.5", "Over/Under 10.5")
+    const ouMatch = norm.match(/o\/u\s*([\d.]+)/);
+    if (ouMatch) {
+        result.sportBetType = 'over_under';
+        result.sportLine = parseFloat(ouMatch[1]);
+        if (result.domain === 'unknown') result.domain = 'sports';
+    }
+
+    // Team total pattern: "Team Total: O/U 21.5"
+    if (norm.match(/team total/)) {
+        result.sportBetType = 'team_total';
+    }
+
+    // Detect "vs" pattern as potential sports matchup (moneyline/winner)
+    const vsMatch = norm.match(/(.+?)\s+(?:vs\.?|versus)\s+(.+?)(?:\s*[:!?]|\s+o\/u|\s*$)/);
+    if (vsMatch && !result.sportBetType) {
+        result.sportBetType = result.sportBetType || 'moneyline';
+        if (result.domain === 'unknown') result.domain = 'sports';
+    }
+
     return result;
 }
 
@@ -521,6 +591,53 @@ function detectRelationship(structA, structB) {
             }
             return result;
         }
+    }
+
+    // ── Sports mismatch guard ──
+    // Different stat categories on the same player/team are NEVER equivalent
+    const sportStatA = structA.sportStat;
+    const sportStatB = structB.sportStat;
+    const sportBetTypeA = structA.sportBetType;
+    const sportBetTypeB = structB.sportBetType;
+
+    if (sportStatA && sportStatB && sportStatA !== sportStatB) {
+        result.relationship = 'related';
+        result.confidence = 0.3;
+        result.reasoning.push(`Same entity but different stat category: ${sportStatA} vs ${sportStatB}`);
+        return result;
+    }
+
+    // Different bet types (e.g., O/U vs moneyline, team_total vs moneyline) are NOT equivalent
+    if (sportBetTypeA && sportBetTypeB && sportBetTypeA !== sportBetTypeB) {
+        result.relationship = 'related';
+        result.confidence = 0.3;
+        result.reasoning.push(`Same entity but different bet type: ${sportBetTypeA} vs ${sportBetTypeB}`);
+        return result;
+    }
+
+    // Different O/U lines on the same stat are related (subset/superset), not equivalent
+    if (structA.sportLine != null && structB.sportLine != null && structA.sportLine !== structB.sportLine) {
+        if (sportStatA === sportStatB || (!sportStatA && !sportStatB)) {
+            // Same stat, different line — this is a threshold relationship
+            result.relationship = structA.sportLine < structB.sportLine ? 'subset' : 'superset';
+            result.confidence = 0.8;
+            result.reasoning.push(`Same stat O/U but different line: ${structA.sportLine} vs ${structB.sportLine}`);
+            return result;
+        }
+    }
+
+    // If one side is sports and the other isn't, they can't be equivalent
+    if ((sportStatA || sportBetTypeA) && !(sportStatB || sportBetTypeB)) {
+        result.relationship = 'related';
+        result.confidence = 0.3;
+        result.reasoning.push('One side is a sports prop, the other is not');
+        return result;
+    }
+    if ((sportStatB || sportBetTypeB) && !(sportStatA || sportBetTypeA)) {
+        result.relationship = 'related';
+        result.confidence = 0.3;
+        result.reasoning.push('One side is a sports prop, the other is not');
+        return result;
     }
 
     // Check temporal mismatch - same claim but different time = related, not equivalent
