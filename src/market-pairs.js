@@ -345,7 +345,7 @@ export async function resolvePair(pair, fetchKalshi) {
                 const stopWords = new Set([
                     'will', 'the', 'be', 'is', 'are', 'was', 'in', 'on', 'at', 'to', 'of', 'for',
                     'and', 'or', 'not', 'by', 'from', 'with', 'this', 'that', 'more', 'than',
-                    'above', 'below', 'over', 'under', 'win', 'wins', 'price', 'reach', 'hit',
+                    'win', 'wins', 'price', 'reach', 'hit',
                     'championship', 'champion', 'finals', 'super', 'bowl', 'nba', 'nfl', 'pro',
                     'football', 'basketball', 'increase', 'decrease', 'rise', 'fall', 'real',
                     'growth', 'rate', 'rates', 'federal', 'reserve', 'fed', 'hike', 'cut',
