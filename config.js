@@ -38,6 +38,13 @@ export const config = {
   // eventually correcting. More like statistical edge trading. Disabled by default.
   enableCombinatorialArb: false,
 
+  // RESOLUTION WATCHER: Monitors recently resolved Polymarket markets for settlement lag.
+  // When a market resolves, prices SHOULD go to $0 or $1 instantly, but they often drift
+  // slowly. This creates a window to buy the obvious winner at a discount.
+  // Example: Market resolved YES, but YES price is still 70¢ instead of 100¢.
+  // LOGGING ONLY — does NOT execute trades. Use for validation before enabling trading.
+  enableResolutionWatcher: false,
+
   // ═══════════════════════════════════════════════════════════
   // CROSS-PLATFORM ARB SETTINGS
   // ═══════════════════════════════════════════════════════════

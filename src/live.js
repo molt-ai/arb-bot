@@ -161,6 +161,7 @@ class LiveBot {
         this.btc15minArb = null;
         this.binanceFeed = null;
         this.chainlinkFeed = null;
+        this.resolutionWatcher = null;
     }
 
     async start() {
@@ -170,6 +171,7 @@ class LiveBot {
         if (this.config.enableBtc15minArb) strategies.push('BTC 15-Min Arb (gabagool)');
         if (this.config.enableSameMarketArb) strategies.push('Same-Market Arb');
         if (this.config.enableCombinatorialArb) strategies.push('Combinatorial (speculative)');
+        if (this.config.enableResolutionWatcher) strategies.push('Resolution Watcher (logging)');
 
         console.log('╔═══════════════════════════════════════════════════╗');
         console.log('║   🎯 ARB BOT v4 — CROSS-PLATFORM FOCUSED        ║');
@@ -241,7 +243,19 @@ class LiveBot {
             console.log('[COMBO-ARB] 📊 Enabled (speculative, not guaranteed profit)');
         }
 
-        // 7. Start auto-redemption engine
+        // 8. Optional: Resolution watcher (settlement lag scanner — logging only)
+        if (this.config.enableResolutionWatcher) {
+            const { ResolutionWatcher } = await import('./resolution-watcher.js');
+            this.resolutionWatcher = new ResolutionWatcher({
+                checkIntervalMs: 5 * 60 * 1000, // 5 min
+                maxAgeHours: 24,
+                minProfitCents: 3,
+            });
+            await this.resolutionWatcher.start();
+            console.log('[RESOLUTION-WATCHER] 🔍 Enabled (logging only — no auto-trade)');
+        }
+
+        // 9. Start auto-redemption engine
         this.autoRedeemer.start();
 
         // 8. Re-scan periodically
@@ -1000,6 +1014,10 @@ class LiveBot {
             const g = this.btc15minArb.getStats();
             statusParts.push(`G15:${g.activeMarkets}mkts/${g.opportunities}opp/${g.trades}trd`);
         }
+        if (this.resolutionWatcher) {
+            const rw = this.resolutionWatcher.getStats();
+            statusParts.push(`RW:${rw.currentOpportunities}opp`);
+        }
 
         statusParts.push(`${p.openPositions} pos`, `P&L: $${p.netPnL}`, `Trades: ${p.totalTrades}`);
         console.log(`[${new Date().toLocaleTimeString()}] ${modeIndicator} | ${statusParts.join(' | ')}`);
@@ -1020,6 +1038,7 @@ class LiveBot {
         if (this.sameMarketArb) this.sameMarketArb.stop();
         if (this.combinatorialArb) this.combinatorialArb.stop();
         if (this.btc15minArb) this.btc15minArb.stop();
+        if (this.resolutionWatcher) this.resolutionWatcher.stop();
         if (this.dashboard?.server) this.dashboard.server.close();
         console.log('\n[STOPPED]');
     }

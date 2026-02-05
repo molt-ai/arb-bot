@@ -153,6 +153,11 @@ export function createDashboard(bot, trader, config = {}) {
         res.json(bot.orderManager?.getStatus() || { pending: 0, stats: {} });
     });
 
+    // Resolution watcher status (settlement lag opportunities)
+    app.get('/api/resolution-watcher', (req, res) => {
+        res.json(bot.resolutionWatcher?.getStatus() || { running: false, opportunities: [], stats: {} });
+    });
+
     // Live executor status & audit log
     app.get('/api/live-executor', (req, res) => {
         res.json(bot.liveExecutor?.getStatus() || { mode: 'paper', stats: {} });
