@@ -14,7 +14,8 @@ export const config = {
   // Single-platform directional bet — not cross-platform arb, but a real edge
   // when exchange prices lead prediction market pricing.
   // Duration-aware: daily markets require stronger momentum than 15-min markets.
-  enableCryptoSpeed: true,
+  // NOTE: Never produced a trade in testing — disabled.
+  enableCryptoSpeed: false,
 
   // THEORETICAL ARB: Buy YES + NO on same Polymarket market when sum < $1.
   // Real arb in theory but windows last ~200ms — too fast for this bot.
@@ -26,7 +27,8 @@ export const config = {
   // combined cost < $1.00 (minus fees). Pure arbitrage — guaranteed $1.00
   // payout regardless of outcome. Walks the CLOB order book for real prices.
   // Reference: https://github.com/gabagool222/15min-btc-polymarket-trading-bot
-  enableBtc15minArb: true,
+  // NOTE: Never produced a trade in testing — disabled.
+  enableBtc15minArb: false,
   btc15minTargetPairCost: 0.97,  // Max combined cost ($) — must be < 1.00 minus fees
   btc15minOrderSize: 10,          // Shares per leg (both UP and DOWN)
 

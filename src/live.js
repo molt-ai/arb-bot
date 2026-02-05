@@ -1,15 +1,13 @@
 /**
  * Live Bot — Main entry point
  * 
- * DEFAULT STRATEGIES (both ON):
+ * DEFAULT STRATEGY:
  * 1. Cross-Platform Arb: Buy YES on Polymarket + NO on Kalshi (or vice versa)
  *    for the SAME event. Guaranteed profit at resolution regardless of outcome.
- * 2. Crypto Speed: Exploit Polymarket crypto markets lagging Binance spot prices.
- *    Covers 15-min, hourly, and daily "above $X" / "up or down" markets.
- *    Duration-aware thresholds scale momentum requirements with market timeframe.
  * 
- * OPTIONAL STRATEGIES (disabled by default, enable via config):
- * - BTC 15-Min Arb: Gabagool strategy — buy UP+DOWN when sum < $1 (TRUE arb)
+ * OPTIONAL STRATEGIES (all disabled by default, enable via config):
+ * - Crypto Speed: Exploit Polymarket crypto markets lagging Binance spot (never produced trades in testing)
+ * - BTC 15-Min Arb: Gabagool strategy — buy UP+DOWN when sum < $1 (never produced trades in testing)
  * - Same-Market Arb: YES+NO < $1 on single platform (theoretical, finds 0)
  * - Combinatorial: Statistical edge from related markets (NOT guaranteed profit)
  */
@@ -252,9 +250,6 @@ class LiveBot {
         // 9. Tick every 10s — check exits, broadcast state
         setInterval(() => this.tick(), 10000);
 
-        // 10. Kalshi REST fallback every 30s
-        setInterval(() => this.pollKalshiFallback(), 30000);
-
         console.log(`\n[LIVE] Bot running — ${strategies.length} strategy(ies) active. Dashboard at :3456\n`);
     }
 
@@ -379,9 +374,12 @@ class LiveBot {
                     const keyTerms = words.filter(w => 
                         !['will', 'the', 'for', 'and', 'not', 'than', 'more', 'less',
                           'what', 'how', 'who', 'when', 'are', 'this', 'that', 'any',
-                          'price', 'above', 'below', 'before', 'after', 'rate', 'rates'].includes(w)
+                          'price', 'before', 'after', 'rate', 'rates'].includes(w)
                     );
-                    return { words, numbers, keyTerms, norm: n };
+                    // Detect direction words — critical for price/threshold markets
+                    const hasAbove = /\b(above|over)\b/.test(n);
+                    const hasBelow = /\b(below|under)\b/.test(n);
+                    return { words, numbers, keyTerms, norm: n, hasAbove, hasBelow };
                 };
                 
                 const minSimilarity = this.config.discoveryMinSimilarity || 0.30;
@@ -395,6 +393,9 @@ class LiveBot {
                     for (const km of shortKalshi) {
                         if (existingKalshi.has(km.ticker)) continue;
                         const kalshiQ = extractEntities(km.title || km.subtitle || '');
+
+                        // Direction mismatch check — "above" vs "below" are opposite markets
+                        if ((polyQ.hasAbove && kalshiQ.hasBelow) || (polyQ.hasBelow && kalshiQ.hasAbove)) continue;
 
                         // Multi-signal scoring:
                         // 1. Jaccard word overlap (baseline)
@@ -699,31 +700,48 @@ class LiveBot {
     // ── Kalshi REST Fallback ────────────────────────────────
 
     async pollKalshiFallback() {
-        try {
-            const kalshiId = this.extractSlug(this.config.kalshiUrl);
-            const markets = await this.kalshi.getMarketsBySlug(kalshiId);
+        if (!this.kalshiCreds) return;
 
-            for (const market of markets || []) {
-                const ticker = market.ticker || market.id;
+        const tickers = this.marketMappings
+            .map(m => m.kalshiTicker)
+            .filter(Boolean);
+        if (tickers.length === 0) return;
+
+        for (const ticker of tickers) {
+            try {
+                // Skip if we have fresh WS data
                 const existing = this.kalshiPrices.get(ticker);
-
                 if (existing?.source === 'ws' && (Date.now() - existing.lastUpdate) < 30000) continue;
 
-                const yes = market.outcomes?.find(o => o.label?.toLowerCase().includes('yes') || o.side === 'yes');
-                const no = market.outcomes?.find(o => o.label?.toLowerCase().includes('no') || o.side === 'no');
+                const path = `/trade-api/v2/markets/${ticker}`;
+                const headers = generateKalshiRestHeaders(
+                    this.kalshiCreds.keyId, this.kalshiCreds.privateKey,
+                    'GET', path
+                );
+                const res = await fetch(`https://api.elections.kalshi.com${path}`, { headers });
+                if (!res.ok) continue;
+
+                const data = await res.json();
+                const market = data.market;
+                if (!market) continue;
+
+                const yesAsk = market.yes_ask ?? 0;
+                const noAsk = market.no_ask ?? 0;
+                if (yesAsk <= 0 && noAsk <= 0) continue;
 
                 this.kalshiPrices.set(ticker, {
-                    yes: (yes?.price || market.outcomes?.[0]?.price || 0) * 100,
-                    no: (no?.price || market.outcomes?.[1]?.price || 0) * 100,
+                    yes: yesAsk,
+                    no: noAsk || (100 - yesAsk),
+                    yesAsk,
                     lastUpdate: Date.now(),
                     source: 'rest-fallback'
                 });
 
                 const mapping = this.marketMappings.find(m => m.kalshiTicker === ticker);
                 if (mapping) this.evaluateSpread(mapping);
+            } catch (e) {
+                // Individual ticker errors are non-critical
             }
-        } catch (e) {
-            // Fallback error is non-critical
         }
     }
 
