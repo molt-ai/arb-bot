@@ -27,8 +27,8 @@ export const config = {
   // combined cost < $1.00 (minus fees). Pure arbitrage — guaranteed $1.00
   // payout regardless of outcome. Walks the CLOB order book for real prices.
   // Reference: https://github.com/gabagool222/15min-btc-polymarket-trading-bot
-  // NOTE: Never produced a trade in testing — disabled.
-  enableBtc15minArb: false,
+  // 15-min BTC/ETH/SOL same-market arb on Polymarket
+  enableBtc15minArb: true,
   btc15minTargetPairCost: 0.97,  // Max combined cost ($) — must be < 1.00 minus fees
   btc15minOrderSize: 10,          // Shares per leg (both UP and DOWN)
 
@@ -82,7 +82,7 @@ export const config = {
   // Cross-platform arb locks capital until resolution, so shorter = better ROI.
   // 180 days captures quarterly economics, sports seasons, near-term politics.
   // Set lower (30-60) for faster capital turnover, higher for more matches.
-  maxDaysToExpiry: 180,
+  maxDaysToExpiry: 7,  // Focus on short-term markets for faster capital turnover
 
   // ═══════════════════════════════════════════════════════════
   // AUTO-DISCOVERY SETTINGS
@@ -94,18 +94,13 @@ export const config = {
   // Kalshi series to scan for auto-discovery (non-sports, cross-platform relevant)
   // These are queried individually — much faster than scanning all 3000+ open markets
   discoveryKalshiSeries: [
-    // Economics / Fed
-    'KXCPI', 'KXGDP', 'KXFED', 'KXFEDDECISION', 'KXRATECUTCOUNT', 'KXLARGECUT',
-    // Crypto
+    // Crypto (daily/hourly markets)
     'KXBTC', 'KXBTCD', 'KXETH', 'KXSOL',
-    // Politics
-    'KXFEDCHAIRNOM', 'KXGOVSHUT', 'KXGREENLAND',
-    // Sports
+    // Economics (monthly releases - short windows)
+    'KXCPI', 'KXGDP',
+    // Sports (game-day markets)
     'KXNBA', 'KXSB',
-    // Entertainment
-    'KXOSCARS', 'KXNEWPOPE',
-    // Elections (long-dated but high volume)
-    'KXPRES28', 'KXDEM28', 'KXREP28',
+    // Removed long-dated: KXFED*, KXPRES28, elections, etc.
   ],
 
   // Minimum similarity score for auto-discovered cross-platform pairs (0-1)

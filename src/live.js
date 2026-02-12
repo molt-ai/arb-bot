@@ -27,6 +27,7 @@ import { AutoRedeemer } from './auto-redeem.js';
 import { OrderManager } from './order-manager.js';
 import { CircuitBreaker } from './circuit-breaker.js';
 import { LiveExecutor } from './live-executor.js';
+import { ResolutionChecker } from './resolution-checker.js';
 
 const POLY_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 const KALSHI_WS_URL = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
@@ -162,6 +163,12 @@ class LiveBot {
         this.binanceFeed = null;
         this.chainlinkFeed = null;
         this.resolutionWatcher = null;
+
+        // Resolution criteria checker (LLM-powered)
+        this.resolutionChecker = new ResolutionChecker({
+            minConfidence: 0.8,
+            cacheExpiryMs: 24 * 60 * 60 * 1000, // 24h
+        });
     }
 
     async start() {
@@ -447,9 +454,10 @@ class LiveBot {
                             try { tokenIds = JSON.parse(tokenIds); } catch(e) {}
                         }
 
-                        const kalshiYes = bestMatch.yes_ask || bestMatch.yes_bid || 0;
-                        const kalshiNo = bestMatch.no_ask || bestMatch.no_bid || 0;
-                        if (kalshiYes <= 0 && kalshiNo <= 0) continue;
+                        const kalshiYes = bestMatch.yes_ask || bestMatch.yes_bid;
+                        const kalshiNo = bestMatch.no_ask || bestMatch.no_bid;
+                        // Skip if either price is missing — need both valid prices
+                        if (!kalshiYes || kalshiYes <= 0 || !kalshiNo || kalshiNo <= 0) continue;
 
                         newMappings.push({
                             name: pm.question || pm.groupItemTitle || bestMatch.title,
@@ -488,17 +496,17 @@ class LiveBot {
             if (this.polyConnected) this.subscribePolyMarkets();
             if (this.kalshiConnected) this.subscribeKalshiMarkets();
 
-            // Seed initial prices from scan data
+            // Seed initial prices from scan data (only if both prices valid)
             for (const m of this.marketMappings) {
-                if (m.polyYes != null) {
+                if (m.polyYes > 0 && m.polyNo > 0) {
                     this.polyPrices.set(m.polyTokenId, {
                         yes: m.polyYes, no: m.polyNo,
                         lastUpdate: Date.now(), source: 'scan'
                     });
                 }
-                if (m.kalshiYes != null) {
+                if (m.kalshiYes > 0 && m.kalshiNo > 0) {
                     this.kalshiPrices.set(m.kalshiTicker, {
-                        yes: m.kalshiYes, no: m.kalshiNo || (100 - m.kalshiYes),
+                        yes: m.kalshiYes, no: m.kalshiNo,
                         lastUpdate: Date.now(), source: 'scan'
                     });
                 }
@@ -739,13 +747,14 @@ class LiveBot {
                 const market = data.market;
                 if (!market) continue;
 
-                const yesAsk = market.yes_ask ?? 0;
-                const noAsk = market.no_ask ?? 0;
-                if (yesAsk <= 0 && noAsk <= 0) continue;
+                const yesAsk = market.yes_ask;
+                const noAsk = market.no_ask;
+                // Skip if either price is missing or 0 — need both valid prices
+                if (!yesAsk || yesAsk <= 0 || !noAsk || noAsk <= 0) continue;
 
                 this.kalshiPrices.set(ticker, {
                     yes: yesAsk,
-                    no: noAsk || (100 - yesAsk),
+                    no: noAsk,
                     yesAsk,
                     lastUpdate: Date.now(),
                     source: 'rest-fallback'
@@ -765,6 +774,18 @@ class LiveBot {
         const poly = this.polyPrices.get(mapping.polyTokenId);
         const kalshi = this.kalshiPrices.get(mapping.kalshiTicker);
         if (!poly || !kalshi) return;
+
+        // Strict price validation — reject null, undefined, NaN, or 0
+        const prices = [poly.yes, poly.no, kalshi.yes, kalshi.no];
+        if (prices.some(p => p == null || isNaN(p) || p === 0)) return;
+
+        // STALENESS CHECK — don't trade on prices older than 60 seconds
+        const MAX_PRICE_AGE_MS = 60000;
+        const now = Date.now();
+        if ((now - (poly.lastUpdate || 0)) > MAX_PRICE_AGE_MS || 
+            (now - (kalshi.lastUpdate || 0)) > MAX_PRICE_AGE_MS) {
+            return; // Skip — prices too old
+        }
 
         const minPrice = this.config.minPriceThreshold || 2;
         if (poly.yes <= minPrice || poly.no <= minPrice || kalshi.yes <= minPrice || kalshi.no <= minPrice) return;
@@ -867,6 +888,41 @@ class LiveBot {
                 this._lastCBLog = Date.now();
             }
             return;
+        }
+
+        // For auto-discovered pairs with big spreads, verify resolution criteria match
+        const isAutoDiscovered = mapping?.source === 'discovered';
+        const spread = opp.grossSpread || 0;
+        const isBigSpread = spread > 5; // >5% spread is suspicious
+        
+        if (isAutoDiscovered && isBigSpread && this.resolutionChecker) {
+            try {
+                // Build minimal market objects for comparison
+                const polyMarket = { 
+                    id: mapping.polyMarketId,
+                    conditionId: mapping.polyMarketId,
+                    question: opp.name,
+                    description: mapping.polyDescription || null,
+                };
+                const kalshiMarket = {
+                    ticker: mapping.kalshiTicker,
+                    title: opp.name,
+                    rules: mapping.kalshiRules || null,
+                };
+                
+                const resCheck = await this.resolutionChecker.check(polyMarket, kalshiMarket, spread);
+                
+                if (!resCheck.approved) {
+                    console.log(`⚠️ [RESOLUTION-CHECK] Blocked ${opp.name}: ${resCheck.reason}`);
+                    if (resCheck.issues?.length) {
+                        resCheck.issues.forEach(i => console.log(`   • ${i}`));
+                    }
+                    return; // Don't trade if resolution criteria don't match
+                }
+            } catch (e) {
+                console.log(`⚠️ [RESOLUTION-CHECK] Error checking ${opp.name}: ${e.message}`);
+                // Continue with trade if check fails (fail-open for now)
+            }
         }
 
         if (!this.executionLock.tryAcquire()) {
